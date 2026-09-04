@@ -10,7 +10,6 @@ import { createBoard, worldToSquare } from './game/board.js';
 import { createTable } from './game/table.js';
 import { createBursts } from './game/fx.js';
 import { createMatch } from './game/match.js';
-import { createBoard2D } from './game/board2d.js';
 import { createHud } from './ui/hud.js';
 import { createMenu, loadSettings } from './ui/menu.js';
 import { createAudio } from './core/audio.js';
@@ -124,27 +123,12 @@ function markLastMove(move = match.state.lastMove) {
 	board.setMark(move.to, 3, 1);
 }
 
-// 二维棋盘：与 3D 场景照同一面镜子。
-const view2d = createBoard2D(document.getElementById('board2d'), { onSquare: clickSquare });
-
-function sync2d() {
-	view2d.render({
-		pos: match.state.pos,
-		selected,
-		legal,
-		lastMove: match.state.lastMove,
-		checkSq,
-		flipped: stage.state.flipped
-	});
-}
-
 function refresh() {
 	const tally = match.tally();
 	hud.setMaterial(tally[WHITE], tally[BLACK]);
 	hud.setEval(match.state.eval);
 	hud.setLedger(match.state.history);
 	hud.setClocks(match.state.clocks[WHITE], match.state.clocks[BLACK]);
-	sync2d();
 }
 
 // ── 选中 ────────────────────────────────────────────────────
@@ -154,7 +138,6 @@ function clearSelection() {
 	legal = [];
 	table.select(-1);
 	board.clearMarks([0, 1]);
-	sync2d();
 }
 
 function selectSquare(sq) {
@@ -167,7 +150,6 @@ function selectSquare(sq) {
 	board.setMark(sq, 0, 1);
 	for (const move of moves) board.setMark(move.to, move.flags & CAPTURE ? 2 : 1, 1);
 	audio.lift();
-	sync2d();
 	return true;
 }
 
@@ -212,7 +194,6 @@ canvas.addEventListener('pointerdown', event => {
 	downAt = { x: event.clientX, y: event.clientY };
 });
 
-// 3D 拾取和 2D 格子点击走同一条落子逻辑。
 function clickSquare(sq) {
 	if (!playing || paused || hud.promoting) return;
 	if (sq < 0) { clearSelection(); return; }
@@ -257,10 +238,14 @@ const menu = createMenu({
 });
 
 function setView(value) {
-	document.body.classList.toggle('mode2d', value === '2d');
-	hud.setTool('mode', value === '2d');
-	if (playing) hud.setHint(value === '2d' ? '点击棋子拿起 · 点击格子落子 · V 返回三维' : '拖拽旋转视角 · 点击棋子拿起');
-	sync2d();
+	const topdown = value === '2d';
+	document.body.classList.toggle('mode2d', topdown);
+	stage.setTopDown(topdown);
+	table.setBadgeIcons(topdown);
+	table.setBadges(topdown || settings.badges === 'on');
+	hud.setTool('mode', topdown);
+	hud.setTool('badges', topdown || settings.badges === 'on');
+	if (playing) hud.setHint(topdown ? '俯瞰模式 · 点击棋子拿起，点击格子落子 · V 换回三维' : '拖拽旋转视角 · 点击棋子拿起');
 }
 
 function applySetting(key, value) {
@@ -268,7 +253,7 @@ function applySetting(key, value) {
 	else if (key === 'quality') stage.setQuality(value);
 	else if (key === 'sound') audio.enabled = value === 'on';
 	else if (key === 'hints') { board.setHints(value === 'on'); hud.setTool('hints', value === 'on'); }
-	else if (key === 'badges') { table.setBadges(value === 'on'); hud.setTool('badges', value === 'on'); }
+	else if (key === 'badges') { table.setBadges(value === 'on' || settings.view === '2d'); hud.setTool('badges', value === 'on' || settings.view === '2d'); }
 	else if (key === 'snow') snowfall.setDensity(value === 'heavy' ? 1 : value === 'light' ? 0.45 : 0);
 }
 
@@ -307,7 +292,7 @@ function pause() {
 	const side = SIDE_TEXT[match.state.pos.turn];
 	menu.slot('pause-line', `第 ${move} 回合 · ${side}行棋`);
 	menu.show('pause');
-	stage.controls.enabled = true;
+	stage.controls.enabled = settings.view !== '2d';
 }
 
 function resume() {
@@ -376,7 +361,7 @@ function handleTool(tool) {
 	else if (tool === 'badges') { settings.badges = settings.badges === 'on' ? 'off' : 'on'; menu.set('badges', settings.badges); applySetting('badges', settings.badges); }
 	else if (tool === 'sound') { settings.sound = settings.sound === 'on' ? 'off' : 'on'; menu.set('sound', settings.sound); applySetting('sound', settings.sound); hud.setTool('sound', settings.sound === 'on'); }
 	else if (tool === 'mode') { settings.view = settings.view === '2d' ? '3d' : '2d'; menu.set('view', settings.view); applySetting('view', settings.view); }
-	else if (tool === 'flip') { hud.toast(stage.flip() ? '棋盘已翻转 · 黑曜近手' : '棋盘已翻转 · 象牙近手'); sync2d(); }
+	else if (tool === 'flip') { hud.toast(stage.flip() ? '棋盘已翻转 · 黑曜近手' : '棋盘已翻转 · 象牙近手'); }
 	else if (tool === 'view') { hud.toast(`视角 · ${stage.cycleView()}`); }
 	else if (tool === 'full') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); }
 	else if (tool === 'pause') pause();

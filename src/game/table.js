@@ -21,6 +21,7 @@ export function createTable(scene, bursts) {
 	const tweens = [];
 	const meshes = [];
 	let badgesOn = false;
+	let badgeIcons = false;
 
 	function spawn(type, color, sq) {
 		const mesh = new THREE.Mesh(geometries[type], pieceMaterial(color === WHITE ? 'ivory' : 'obsidian'));
@@ -35,8 +36,10 @@ export function createTable(scene, bursts) {
 		meshes.push(mesh);
 
 		const badge = createBadge(type, color);
+		if (badgeIcons) badge.material.map = badge.userData.maps.icon;
 		badge.visible = badgesOn;
 		badge.material.opacity = badgesOn ? 1 : 0;
+		if (badgeIcons) badge.scale.set(0.40, 0.46, 1);
 		group.add(badge);
 
 		const entry = { mesh, badge, type, color, sq, lift: 0, selected: false, bob: Math.random() * 6.28 };
@@ -178,6 +181,14 @@ export function createTable(scene, bursts) {
 			badgesOn = on;
 			for (const entry of bySquare.values()) entry.badge.visible = on;
 		},
+		// 俯瞰模式：换成棋形图案，并放大到格子里一眼可辨。
+		setBadgeIcons(on) {
+			badgeIcons = on;
+			for (const entry of bySquare.values()) {
+				entry.badge.material.map = on ? entry.badge.userData.maps.icon : entry.badge.userData.maps.letter;
+				entry.badge.scale.set(on ? 0.40 : 0.26, on ? 0.46 : 0.30, 1);
+			}
+		},
 		update(dt, time) {
 			for (let i = tweens.length - 1; i >= 0; i--) {
 				const tw = tweens[i];
@@ -199,7 +210,7 @@ export function createTable(scene, bursts) {
 				if (entry.badge.visible) {
 					entry.badge.position.set(
 						entry.mesh.position.x,
-						entry.mesh.position.y + PIECE_TOP[entry.type] + 0.26,
+						entry.mesh.position.y + PIECE_TOP[entry.type] + (badgeIcons ? 0.12 : 0.26),
 						entry.mesh.position.z
 					);
 					entry.badge.material.opacity += (1 - entry.badge.material.opacity) * Math.min(1, dt * 6);

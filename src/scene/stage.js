@@ -14,6 +14,12 @@ const VIEWS = {
 	over: { radius: 12.6, polar: 0.14, yaw: 0, label: '俯瞰' }
 };
 
+// 二维模式：同一副 3D 棋盘，只是被钉在正上方。90° 俯瞰、
+// 视野收窄（棋盘铺满画面），并且锁定轨道控制。
+// 往 z 轴偏 0.35：太小会让 up 向量与视线平行导致万向锁，
+// 这个偏移同时决定"上"是棋盘的远端（白方视角）。
+const TOPDOWN = { radius: 15.6, offset: 0.35, fov: 30 };
+
 export function createStage(canvas, quality = 'high') {
 	const cfg = QUALITY[quality] || QUALITY.high;
 
@@ -22,7 +28,10 @@ export function createStage(canvas, quality = 'high') {
 	const viewport = () => [Math.max(1, innerWidth), Math.max(1, innerHeight)];
 
 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', stencil: false });
-	renderer.setPixelRatio(Math.min(devicePixelRatio, cfg.pixel));
+	// 无 GPU 的软件渲染（沙盒/远程无头环境）扛不住高像素比，
+	// 直接锁 1——反正本来就跑不满帧。
+	const softGL = (renderer.getContext().getParameter(renderer.getContext().RENDERER) || '').match(/swiftshader|llvmpipe|software/i);
+	renderer.setPixelRatio(softGL ? 1 : Math.min(devicePixelRatio, cfg.pixel));
 	renderer.setSize(...viewport());
 	renderer.outputColorSpace = THREE.SRGBColorSpace;
 	renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -60,6 +69,7 @@ export function createStage(canvas, quality = 'high') {
 		azimuth: 0,
 		view: 'seat',
 		flipped: false,
+		topdown: false,
 		frames: [],
 		measured: false
 	};
@@ -77,13 +87,19 @@ export function createStage(canvas, quality = 'high') {
 	let glide = null;
 	function moveTo(view, { instant = false } = {}) {
 		state.view = view;
-		const preset = VIEWS[view] || VIEWS.seat;
-		const azimuth = (preset.yaw || 0) + (state.flipped ? Math.PI : 0);
-		const target = new THREE.Vector3(
-			Math.sin(azimuth) * Math.sin(preset.polar),
-			Math.cos(preset.polar),
-			Math.cos(azimuth) * Math.sin(preset.polar)
-		).multiplyScalar(preset.radius).add(controls.target);
+		let target;
+		if (state.topdown) {
+			const off = state.flipped ? -TOPDOWN.offset : TOPDOWN.offset;
+			target = new THREE.Vector3(controls.target.x, controls.target.y + TOPDOWN.radius, controls.target.z + off);
+		} else {
+			const preset = VIEWS[view] || VIEWS.seat;
+			const azimuth = (preset.yaw || 0) + (state.flipped ? Math.PI : 0);
+			target = new THREE.Vector3(
+				Math.sin(azimuth) * Math.sin(preset.polar),
+				Math.cos(preset.polar),
+				Math.cos(azimuth) * Math.sin(preset.polar)
+			).multiplyScalar(preset.radius).add(controls.target);
+		}
 		if (instant) { camera.position.copy(target); controls.update(); return; }
 		glide = { from: camera.position.clone(), to: target, t: 0, dur: 1.05 };
 	}
@@ -109,6 +125,14 @@ export function createStage(canvas, quality = 'high') {
 		}
 
 		controls.update();
+
+		// 俯瞰时把相机一直按在正上方。轨道已禁用，这里只需
+		// 覆盖 glide 结束后的姿态，保证每帧都钉死。
+		if (state.topdown && !state.attract) {
+			const off = state.flipped ? -TOPDOWN.offset : TOPDOWN.offset;
+			camera.position.set(controls.target.x, controls.target.y + TOPDOWN.radius, controls.target.z + off);
+			camera.lookAt(controls.target);
+		}
 
 		// 菜单占着画面左侧。把视线稍微瞄向棋盘左侧，
 		// 棋盘就留在空出来的右半边——而且这必须放在
@@ -165,13 +189,32 @@ export function createStage(canvas, quality = 'high') {
 		moveTo,
 		setAttract(on) {
 			state.attract = on;
-			controls.enabled = !on;
+			controls.enabled = !on && !state.topdown;
 			if (!on) moveTo(state.view);
 		},
 		flip() {
 			state.flipped = !state.flipped;
 			moveTo(state.view);
 			return state.flipped;
+		},
+		// 俯瞰（二维）模式：钉住相机、收窄视野、锁定轨道。
+		setTopDown(on) {
+			if (state.topdown === on) return;
+			state.topdown = on;
+			camera.fov = on ? TOPDOWN.fov : 42;
+			camera.updateProjectionMatrix();
+			// 完全禁用轨道——否则 minPolarAngle 会把正上方的相机钳回去，
+			// 和钉住逻辑打架，拾取坐标全歪。
+			controls.enabled = false;
+			controls.enableZoom = !on;
+			controls.enableRotate = !on;
+			controls.enableDamping = !on;
+			moveTo(state.view, { instant: true });
+			if (on) {
+				const off = state.flipped ? -TOPDOWN.offset : TOPDOWN.offset;
+				camera.position.set(controls.target.x, controls.target.y + TOPDOWN.radius, controls.target.z + off);
+				camera.lookAt(controls.target);
+			}
 		},
 		cycleView() {
 			const order = Object.keys(VIEWS);
