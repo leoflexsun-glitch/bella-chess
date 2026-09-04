@@ -44,6 +44,7 @@
 				<div><dt>F</dt><dd>翻转棋盘</dd></div>
 				<div><dt>U</dt><dd>悔棋</dd></div>
 				<div><dt>H</dt><dd>开关走子提示</dd></div>
+				<div><dt>V</dt><dd>切换二维 / 三维棋盘</dd></div>
 				<div><dt>Esc</dt><dd>暂停</dd></div>
 			</dl>
 			<nav class="menu" data-menu="controls">
@@ -58,6 +59,7 @@
 			<p class="overline">调整</p>
 			<h2 class="subtitle">设置</h2>
 			<nav class="menu" data-menu="settings">
+				<button class="mi val" data-act="view"><i></i><span>视图</span><b class="v">三维</b></button>
 				<button class="mi val" data-act="quality"><i></i><span>画质</span><b class="v">高</b></button>
 				<button class="mi val" data-act="snow"><i></i><span>降雪</span><b class="v">大雪</b></button>
 				<button class="mi val" data-act="sound"><i></i><span>声音</span><b class="v">开</b></button>
@@ -126,6 +128,7 @@
 		<button class="tb" data-tool="hints" title="走子提示" aria-label="开关走子提示"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="2.6" width="10.8" height="10.8"/><circle cx="8" cy="8" r="2.1" fill="currentColor" stroke="none"/></svg></button>
 		<button class="tb" data-tool="badges" title="棋子标记" aria-label="开关棋子标记"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.2 13 4.1v4.4c0 2.6-2.2 4.4-5 5.4-2.8-1-5-2.8-5-5.4V4.1z"/></svg></button>
 		<button class="tb" data-tool="flip" title="翻转棋盘" aria-label="翻转棋盘"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 5.8 8 2.4l3.4 3.4M4.6 10.2 8 13.6l3.4-3.4"/></svg></button>
+		<button class="tb" data-tool="mode" title="二维棋盘" aria-label="切换二维棋盘"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="2.6" width="10.8" height="10.8"/><path d="M2.6 8h10.8M8 2.6v10.8"/></svg></button>
 		<button class="tb" data-tool="view" title="相机视角" aria-label="切换相机视角"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 5.2 8 2.4l5.4 2.8v5.6L8 13.6l-5.4-2.8z"/><path d="M2.6 5.2 8 8v5.6M13.4 5.2 8 8"/></svg></button>
 		<button class="tb" data-tool="sound" title="声音" aria-label="开关声音"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 6.1h2.4L8.6 3v10L5.2 9.9H2.8z"/><path d="M11.2 5.7a3.3 3.3 0 0 1 0 4.6"/></svg></button>
 		<button class="tb" data-tool="full" title="全屏" aria-label="切换全屏"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 6V2.6H6M10 2.6h3.4V6M13.4 10v3.4H10M6 13.4H2.6V10"/></svg></button>
@@ -163,6 +166,9 @@
 	</div>
 
 </div>
+
+<!-- ── 二维棋盘 ────────────────────────────────────────── -->
+<div id="board2d" aria-label="二维棋盘"></div>
 
 <div id="boot">
 	<p class="overline">霜林博弈</p>

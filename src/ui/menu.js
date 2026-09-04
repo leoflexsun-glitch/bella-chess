@@ -8,6 +8,7 @@ export const OPTIONS = {
 		{ id: 'expert', label: '专家' },
 		{ id: 'master', label: '大师' }
 	],
+	view: [{ id: '3d', label: '三维' }, { id: '2d', label: '二维' }],
 	quality: [{ id: 'ultra', label: '极致' }, { id: 'high', label: '高' }, { id: 'low', label: '低' }],
 	snow: [{ id: 'heavy', label: '大雪' }, { id: 'light', label: '小雪' }, { id: 'off', label: '关闭' }],
 	sound: [{ id: 'on', label: '开' }, { id: 'off', label: '关' }],
@@ -15,7 +16,7 @@ export const OPTIONS = {
 	badges: [{ id: 'off', label: '关' }, { id: 'on', label: '开' }]
 };
 
-const DEFAULTS = { side: 'w', level: 'club', quality: 'high', snow: 'heavy', sound: 'on', hints: 'on', badges: 'off' };
+const DEFAULTS = { side: 'w', level: 'club', view: '3d', quality: 'high', snow: 'heavy', sound: 'on', hints: 'on', badges: 'off' };
 
 export function loadSettings() {
 	try {

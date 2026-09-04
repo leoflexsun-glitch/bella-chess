@@ -10,10 +10,11 @@ import { createBoard, worldToSquare } from './game/board.js';
 import { createTable } from './game/table.js';
 import { createBursts } from './game/fx.js';
 import { createMatch } from './game/match.js';
+import { createBoard2D } from './game/board2d.js';
 import { createHud } from './ui/hud.js';
 import { createMenu, loadSettings } from './ui/menu.js';
 import { createAudio } from './core/audio.js';
-import { WHITE, BLACK, QUEEN, CAPTURE } from './chess/engine.js';
+import { WHITE, BLACK, QUEEN, CAPTURE, colorOf } from './chess/engine.js';
 
 const settings = loadSettings();
 const audio = createAudio();
@@ -76,6 +77,7 @@ let legal = [];
 let paused = false;
 let playing = false;
 let reviewing = false;
+let checkSq = -1;
 
 const hud = createHud({ onTool: tool => handleTool(tool) });
 
@@ -84,6 +86,7 @@ const match = createMatch({
 		table.sync(match.state.pos);
 		selected = -1;
 		legal = [];
+		checkSq = -1;
 		board.clearMarks();
 		markLastMove();
 		refresh();
@@ -91,6 +94,7 @@ const match = createMatch({
 	onTurn: (color, check) => {
 		hud.setTurn(color === WHITE ? 'w' : 'b', { thinking: match.state.thinking, check });
 		board.clearMarks([2]);
+		checkSq = check ? match.state.pos.kings[color >> 3] : -1;
 		if (check) {
 			board.setMark(match.state.pos.kings[color >> 3], 2, 1);
 			audio.check();
@@ -120,12 +124,27 @@ function markLastMove(move = match.state.lastMove) {
 	board.setMark(move.to, 3, 1);
 }
 
+// 二维棋盘：与 3D 场景照同一面镜子。
+const view2d = createBoard2D(document.getElementById('board2d'), { onSquare: clickSquare });
+
+function sync2d() {
+	view2d.render({
+		pos: match.state.pos,
+		selected,
+		legal,
+		lastMove: match.state.lastMove,
+		checkSq,
+		flipped: stage.state.flipped
+	});
+}
+
 function refresh() {
 	const tally = match.tally();
 	hud.setMaterial(tally[WHITE], tally[BLACK]);
 	hud.setEval(match.state.eval);
 	hud.setLedger(match.state.history);
 	hud.setClocks(match.state.clocks[WHITE], match.state.clocks[BLACK]);
+	sync2d();
 }
 
 // ── 选中 ────────────────────────────────────────────────────
@@ -135,6 +154,7 @@ function clearSelection() {
 	legal = [];
 	table.select(-1);
 	board.clearMarks([0, 1]);
+	sync2d();
 }
 
 function selectSquare(sq) {
@@ -147,6 +167,7 @@ function selectSquare(sq) {
 	board.setMark(sq, 0, 1);
 	for (const move of moves) board.setMark(move.to, move.flags & CAPTURE ? 2 : 1, 1);
 	audio.lift();
+	sync2d();
 	return true;
 }
 
@@ -191,24 +212,28 @@ canvas.addEventListener('pointerdown', event => {
 	downAt = { x: event.clientX, y: event.clientY };
 });
 
-canvas.addEventListener('pointerup', event => {
-	if (!playing || paused || !downAt) return;
-	const dragged = Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 6;
-	downAt = null;
-	if (dragged || hud.promoting) return;
-
-	const sq = pick(event);
+// 3D 拾取和 2D 格子点击走同一条落子逻辑。
+function clickSquare(sq) {
+	if (!playing || paused || hud.promoting) return;
 	if (sq < 0) { clearSelection(); return; }
 
 	if (selected >= 0 && attempt(sq)) return;
 
-	const entry = table.at(sq);
-	if (entry && entry.color === match.state.human && !match.state.over) {
+	const piece = match.state.pos.board[sq];
+	if (piece && colorOf(piece) === match.state.human && !match.state.over) {
 		if (sq === selected) clearSelection();
 		else selectSquare(sq);
 	} else {
 		clearSelection();
 	}
+}
+
+canvas.addEventListener('pointerup', event => {
+	if (!playing || paused || !downAt) return;
+	const dragged = Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 6;
+	downAt = null;
+	if (dragged) return;
+	clickSquare(pick(event));
 });
 
 // ── 菜单 ─────────────────────────────────────────────────────────
@@ -231,8 +256,16 @@ const menu = createMenu({
 	}
 });
 
+function setView(value) {
+	document.body.classList.toggle('mode2d', value === '2d');
+	hud.setTool('mode', value === '2d');
+	if (playing) hud.setHint(value === '2d' ? '点击棋子拿起 · 点击格子落子 · V 返回三维' : '拖拽旋转视角 · 点击棋子拿起');
+	sync2d();
+}
+
 function applySetting(key, value) {
-	if (key === 'quality') stage.setQuality(value);
+	if (key === 'view') setView(value);
+	else if (key === 'quality') stage.setQuality(value);
 	else if (key === 'sound') audio.enabled = value === 'on';
 	else if (key === 'hints') { board.setHints(value === 'on'); hud.setTool('hints', value === 'on'); }
 	else if (key === 'badges') { table.setBadges(value === 'on'); hud.setTool('badges', value === 'on'); }
@@ -263,7 +296,7 @@ function startGame() {
 	hud.setTool('hints', settings.hints === 'on');
 	hud.setTool('badges', settings.badges === 'on');
 	hud.setTool('sound', settings.sound === 'on');
-	hud.setHint('拖拽旋转视角 · 点击棋子拿起');
+	setView(settings.view);
 	match.newGame({ human, level: settings.level });
 }
 
@@ -342,7 +375,8 @@ function handleTool(tool) {
 	if (tool === 'hints') { settings.hints = settings.hints === 'on' ? 'off' : 'on'; menu.set('hints', settings.hints); applySetting('hints', settings.hints); }
 	else if (tool === 'badges') { settings.badges = settings.badges === 'on' ? 'off' : 'on'; menu.set('badges', settings.badges); applySetting('badges', settings.badges); }
 	else if (tool === 'sound') { settings.sound = settings.sound === 'on' ? 'off' : 'on'; menu.set('sound', settings.sound); applySetting('sound', settings.sound); hud.setTool('sound', settings.sound === 'on'); }
-	else if (tool === 'flip') { hud.toast(stage.flip() ? '棋盘已翻转 · 黑曜近手' : '棋盘已翻转 · 象牙近手'); }
+	else if (tool === 'mode') { settings.view = settings.view === '2d' ? '3d' : '2d'; menu.set('view', settings.view); applySetting('view', settings.view); }
+	else if (tool === 'flip') { hud.toast(stage.flip() ? '棋盘已翻转 · 黑曜近手' : '棋盘已翻转 · 象牙近手'); sync2d(); }
 	else if (tool === 'view') { hud.toast(`视角 · ${stage.cycleView()}`); }
 	else if (tool === 'full') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); }
 	else if (tool === 'pause') pause();
@@ -366,6 +400,7 @@ addEventListener('keydown', event => {
 	else if (key === 'u') handleTool('undo');
 	else if (key === 'h') handleTool('hints');
 	else if (key === 'm') handleTool('badges');
+	else if (key === 'v') handleTool('mode');
 });
 
 // ── 循环 ─────────────────────────────────────────────────────────
@@ -396,6 +431,7 @@ stage.onUpdate((dt, time) => {
 // ── 启动 ─────────────────────────────────────────────────────────
 
 table.sync(match.state.pos);
+setView(settings.view);
 menu.show('title');
 
 // 标签页可见时等两帧，不可见时走定时器——无论哪条路，
