@@ -1,7 +1,7 @@
 const STORE = 'frostfall.settings';
 
 export const OPTIONS = {
-	side: [{ id: 'w', label: '象牙' }, { id: 'b', label: '黑曜' }],
+	side: [{ id: 'w', label: '人先 · 象牙' }, { id: 'b', label: '机先 · 黑曜' }],
 	level: [
 		{ id: 'novice', label: '新手' },
 		{ id: 'club', label: '棋社' },
