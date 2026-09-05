@@ -22,18 +22,22 @@ function badgeTexture(type, color, icon = false) {
 	ctx.scale(S, S);
 
 	if (icon) {
-		const glyph = color === WHITE ? ICON_W[type] : ICON_B[type];
+		// 双方都用实心字形（♝ 的斜切口、♞ 的马头在小尺寸下依然分明），
+		// 只靠颜色区分敌我：白子=白填充+深描边，黑子=纯深填充。
+		// 空心字形 ♗/♙ 缩到棋子大小时轮廓几乎一样，分不清象和兵。
+		const glyph = ICON_B[type];
 		const fill = color === WHITE ? '#ffffff' : '#2e2a26';
-		const stroke = color === WHITE ? '#3a4148' : '#1d1a17';
+		const stroke = color === WHITE ? '#39414a' : '#211d1a';
 		ctx.textAlign = 'center';
 		ctx.textBaseline = 'middle';
-		ctx.font = '104px "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif';
+		ctx.font = '106px "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif';
 		ctx.lineJoin = 'round';
 		// 轻投影，让棋子像贴纸一样落在格子上。
 		ctx.shadowColor = 'rgba(30,34,40,.30)';
 		ctx.shadowBlur = 6;
 		ctx.shadowOffsetY = 4;
-		ctx.lineWidth = color === WHITE ? 9 : 5;
+		// 白子描边粗一点，实心字形内部细节（象的切口等）才不会被填充吃掉。
+		ctx.lineWidth = color === WHITE ? 8 : 4;
 		ctx.strokeStyle = stroke;
 		ctx.strokeText(glyph, 64, 68);
 		ctx.shadowColor = 'transparent';
