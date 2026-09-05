@@ -245,6 +245,7 @@ function setView(value) {
 	document.body.classList.toggle('mode2d', topdown);
 	stage.setTopDown(topdown);
 	board.setFlat(topdown);
+	board.setFlipped(stage.state.flipped);
 	table.setBadgeIcons(topdown);
 	table.setBadges(topdown || settings.badges === 'on');
 	hud.setTool('mode', topdown);
@@ -281,6 +282,7 @@ stage.onQuality((next, automatic) => {
 function startGame() {
 	const human = settings.side === 'b' ? BLACK : WHITE;
 	stage.state.flipped = human === BLACK;
+	board.setFlipped(stage.state.flipped);
 	playing = true;
 	paused = false;
 	reviewing = false;
@@ -375,7 +377,7 @@ function handleTool(tool) {
 	else if (tool === 'badges') { settings.badges = settings.badges === 'on' ? 'off' : 'on'; menu.set('badges', settings.badges); applySetting('badges', settings.badges); }
 	else if (tool === 'sound') { settings.sound = settings.sound === 'on' ? 'off' : 'on'; menu.set('sound', settings.sound); applySetting('sound', settings.sound); hud.setTool('sound', settings.sound === 'on'); }
 	else if (tool === 'mode') { settings.view = settings.view === '2d' ? '3d' : '2d'; menu.set('view', settings.view); applySetting('view', settings.view); }
-	else if (tool === 'flip') { hud.toast(stage.flip() ? '棋盘已翻转 · 黑曜近手' : '棋盘已翻转 · 象牙近手'); }
+	else if (tool === 'flip') { const fl = stage.flip(); board.setFlipped(fl); hud.toast(fl ? '棋盘已翻转 · 黑曜近手' : '棋盘已翻转 · 象牙近手'); }
 	else if (tool === 'view') { hud.toast(`视角 · ${stage.cycleView()}`); }
 	else if (tool === 'full') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); }
 	else if (tool === 'pause') pause();

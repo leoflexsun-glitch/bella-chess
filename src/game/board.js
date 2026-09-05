@@ -234,6 +234,50 @@ export function createBoard(scene) {
 
 	scene.add(group);
 
+	// ── 扁平模式的坐标牌 ────────────────────────────────────
+	// 坐标原本烘在边框上，扁平模式没有边框，棋盘四周就没有 a–h / 1–8
+	// 可看了。这里画一块带坐标的透明底板垫在棋盘下，仅扁平模式显示。
+	const COORDS_PX = 940; // 9.4 世界单位 × 100px
+	// 横坐标在底边、纵坐标沿左边，按"屏幕正视角"画一张；
+	// files/ranks 按视角传入。canvas 顶边 = 世界 -z。
+	function drawCoords(files, ranks) {
+		const cv = document.createElement('canvas');
+		cv.width = cv.height = COORDS_PX;
+		const c = cv.getContext('2d');
+		const margin = (COORDS_PX - 800) / 2; // 棋盘占中间 8×100px
+		c.fillStyle = 'rgba(33, 39, 48, .58)';
+		c.font = '600 36px "Geist", system-ui, sans-serif';
+		c.textAlign = 'center';
+		c.textBaseline = 'middle';
+		for (let i = 0; i < 8; i++) {
+			const p = margin + (i + 0.5) * 100;
+			c.fillText(files[i], p, COORDS_PX - margin / 2);
+			c.fillText(String(ranks[i]), margin / 2, p);
+		}
+		return cv;
+	}
+	// 翻转视角 = 世界→屏幕转了 180°：把"黑方视角"的坐标画好再整个转 180°，
+	// 上屏后字才是正的，且底边读 h–a、左边读 1–8。
+	function rotate180(src) {
+		const cv = document.createElement('canvas');
+		cv.width = cv.height = src.width;
+		const c = cv.getContext('2d');
+		c.translate(src.width / 2, src.height / 2);
+		c.rotate(Math.PI);
+		c.drawImage(src, -src.width / 2, -src.height / 2);
+		return cv;
+	}
+	const coordTex = new THREE.CanvasTexture(drawCoords('abcdefgh', [8, 7, 6, 5, 4, 3, 2, 1]));
+	const coordTexFlip = new THREE.CanvasTexture(rotate180(drawCoords('hgfedcba', [1, 2, 3, 4, 5, 6, 7, 8])));
+	for (const t of [coordTex, coordTexFlip]) { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; }
+	const coords = new THREE.Mesh(
+		new THREE.PlaneGeometry(9.4, 9.4).rotateX(-Math.PI / 2),
+		new THREE.MeshBasicMaterial({ map: coordTex, transparent: true, depthWrite: false })
+	);
+	coords.position.y = 0.008; // 棋盘面之下、石板之上
+	coords.visible = false;
+	group.add(coords);
+
 	// ── 实体网格提示（fallback）─────────────────────────────
 	// 棋盘高亮走片元着色器 + DataTexture，在 mediump 精度的手机 GPU
 	// 上 UV/格内坐标会漂移，导致落点圆点和吃子环整个消失。
@@ -316,9 +360,12 @@ export function createBoard(scene) {
 			uniforms.uFlat.value = on ? 1 : 0;
 			frame.visible = !on;
 			slab.visible = !on;
+			coords.visible = on;
 			flatOverlay = on;
 			syncOverlay();
 		},
+		// 翻转时换用"黑方视角"的坐标纹理，底边读 h–a、左边读 1–8。
+		setFlipped(fl) { coords.material.map = fl ? coordTexFlip : coordTex; },
 		get overlay() { return overlayOn(); },
 		update(_dt, time) { uniforms.uTime.value = time; }
 	};

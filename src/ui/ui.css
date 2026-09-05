@@ -457,3 +457,28 @@ body.mode2d #ui { text-shadow: var(--halo); }
 body.mode2d .tb,
 body.mode2d .mini { background: rgba(255, 255, 255, .55); border-radius: 8px; }
 body.mode2d .hud-toast { background: rgba(255, 255, 255, .82); color: #212730; text-shadow: none; border-radius: 10px; }
+
+/* 二维模式：所有 HUD 文字加大、加粗、加深——10px 细体在浅底上没法看。 */
+body.mode2d .hud-clocks .side { grid-template-columns: 7px 96px 1fr auto; padding: 11px 2px; }
+body.mode2d .hud-clocks .side::before { width: 7px; height: 7px; }
+body.mode2d .hud-clocks .side.act::before { background: #2f6db3; box-shadow: 0 0 8px rgba(47, 109, 179, .6); }
+body.mode2d .hud-clocks .tag { font-size: 13px; letter-spacing: .18em; color: var(--dim); }
+body.mode2d .hud-clocks .side.act .tag { color: #212730; }
+body.mode2d .hud-clocks .mat { font-size: 12px; }
+body.mode2d .hud-clocks .clock { font-size: 21px; font-weight: 600; color: #212730; }
+body.mode2d .hud-clocks .side.act .clock { color: #212730; }
+body.mode2d .eval-head,
+body.mode2d .ledger-head { font-size: 12px; letter-spacing: .22em; color: var(--dim); }
+body.mode2d .eval-head b { color: #212730; font-weight: 600; }
+body.mode2d .ledger-body { font-size: 14px; }
+body.mode2d .ledger-body li { color: #212730; }
+body.mode2d .ledger-empty { font-size: 11px; color: var(--faint); }
+body.mode2d .hud-hint { font-size: 12px; letter-spacing: .18em; color: var(--dim); }
+body.mode2d .hud-toast { font-size: 13px; letter-spacing: .18em; font-weight: 500; }
+body.mode2d .tb { width: 34px; height: 34px; }
+body.mode2d .tb svg { width: 18px; height: 18px; }
+body.mode2d .promo-row button { font-size: 13px; color: #212730; background: rgba(255, 255, 255, .85); border-color: rgba(33, 39, 48, .3); }
+body.mode2d .mi { font-size: 15px; }
+body.mode2d .mi .v { font-size: 13px; }
+body.mode2d .deflist dd { font-size: 13px; }
+body.mode2d .promo-row button:hover { color: #000; border-color: rgba(33, 39, 48, .6); }
