@@ -66,6 +66,9 @@ const board = createBoard(scene);
 const table = createTable(scene, bursts);
 
 board.setHints(settings.hints === 'on');
+// 手机/触屏：着色器提示在 mediump 精度下会丢，强制启用实体网格提示。
+if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) board.setOverlay(true);
+
 table.setBadges(settings.badges === 'on');
 snowfall.setDensity(settings.snow === 'heavy' ? 1 : settings.snow === 'light' ? 0.45 : 0);
 

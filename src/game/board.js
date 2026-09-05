@@ -223,22 +223,80 @@ export function createBoard(scene) {
 
 	scene.add(group);
 
+	// ── 实体网格提示（fallback）─────────────────────────────
+	// 棋盘高亮走片元着色器 + DataTexture，在 mediump 精度的手机 GPU
+	// 上 UV/格内坐标会漂移，导致落点圆点和吃子环整个消失。
+	// 这里用真实几何体重画同一套提示，不碰浮点精度，任何设备都稳。
+	const overlay = new THREE.Group();
+	overlay.position.y = 0.02; // 略高于冰面，避免 z-fighting
+	group.add(overlay);
+
+	const geoDot = new THREE.CircleGeometry(0.14, 24).rotateX(-Math.PI / 2);
+	const geoRing = new THREE.RingGeometry(0.36, 0.45, 32).rotateX(-Math.PI / 2);
+	const geoSquare = new THREE.PlaneGeometry(0.96, 0.96).rotateX(-Math.PI / 2);
+
+	const matDot = new THREE.MeshBasicMaterial({ color: 0x7fc4ff, transparent: true, opacity: 0.9, depthWrite: false });
+	const matRing = new THREE.MeshBasicMaterial({ color: 0xff8563, transparent: true, opacity: 0.95, depthWrite: false });
+	const matSel = new THREE.MeshBasicMaterial({ color: 0xdcecff, transparent: true, opacity: 0.34, depthWrite: false });
+	const matLast = new THREE.MeshBasicMaterial({ color: 0xf5e9b8, transparent: true, opacity: 0.30, depthWrite: false });
+
+	function overlayMesh(geo, mat, x, y, z) {
+		const m = new THREE.Mesh(geo, mat);
+		m.position.set(x, y, z);
+		m.renderOrder = 4;
+		m.visible = false;
+		overlay.add(m);
+		return m;
+	}
+
+	// 每格四类提示各一份，按需显示/隐藏，避免每步 new。
+	const overlayCells = [];
+	for (let i = 0; i < 64; i++) {
+		const r = i >> 3, f = i & 7;
+		const x = f - 3.5, z = r - 3.5;
+		overlayCells.push({
+			sel: overlayMesh(geoSquare, matSel, x, 0, z),
+			dot: overlayMesh(geoDot, matDot, x, 0.001, z),
+			ring: overlayMesh(geoRing, matRing, x, 0.002, z),
+			last: overlayMesh(geoSquare, matLast, x, -0.001, z)
+		});
+	}
+
+	let overlayOn = false;
+	let hintsOn = true;
+
+	function syncOverlay() {
+		for (let i = 0; i < 64; i++) {
+			const cell = overlayCells[i];
+			const base = i * 4;
+			cell.sel.visible = overlayOn && data[base + 0] > 40;
+			cell.dot.visible = overlayOn && hintsOn && data[base + 1] > 40;
+			cell.ring.visible = overlayOn && hintsOn && data[base + 2] > 40;
+			cell.last.visible = overlayOn && data[base + 3] > 40;
+		}
+	}
+
 	function setMark(sq, channel, value) {
 		const f = sq & 15, r = sq >> 4;
 		data[(r * 8 + f) * 4 + channel] = Math.round(value * 255);
 		marks.needsUpdate = true;
+		syncOverlay();
 	}
 
 	function clearMarks(channels = [0, 1, 2, 3]) {
 		for (let i = 0; i < 64; i++) for (const c of channels) data[i * 4 + c] = 0;
 		marks.needsUpdate = true;
+		syncOverlay();
 	}
 
 	return {
 		group, field, uniforms,
 		setMark, clearMarks,
 		setHover(sq) { uniforms.uHover.value = sq < 0 ? -1 : (sq >> 4) * 8 + (sq & 15); },
-		setHints(on) { uniforms.uHints.value = on ? 1 : 0; },
+		setHints(on) { hintsOn = on; uniforms.uHints.value = on ? 1 : 0; syncOverlay(); },
+		// 强制启用实体网格提示（触屏/移动端自动开，也可手动开）。
+		setOverlay(on) { overlayOn = on; syncOverlay(); },
+		get overlay() { return overlayOn; },
 		update(_dt, time) { uniforms.uTime.value = time; }
 	};
 }
