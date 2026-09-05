@@ -15,10 +15,10 @@ const VIEWS = {
 };
 
 // 二维模式：同一副 3D 棋盘，只是被钉在正上方。90° 俯瞰、
-// 视野收窄（棋盘铺满画面），并且锁定轨道控制。
+// 俯瞰模式：同一副 3D 棋盘，被钉在正上方 90°。
 // 往 z 轴偏 0.35：太小会让 up 向量与视线平行导致万向锁，
 // 这个偏移同时决定"上"是棋盘的远端（白方视角）。
-const TOPDOWN = { radius: 15.6, offset: 0.35, fov: 30 };
+const TOPDOWN = { offset: 0.35, fov: 42, fit: 5.4 };
 
 export function createStage(canvas, quality = 'high') {
 	const cfg = QUALITY[quality] || QUALITY.high;
@@ -80,17 +80,31 @@ export function createStage(canvas, quality = 'high') {
 		camera.updateProjectionMatrix();
 		renderer.setSize(w, h);
 		post.setSize(w, h);
+		// 俯瞰下视野随宽高比变化，重新钉一次保证棋盘完整入画。
+		if (state.topdown && !state.attract) {
+			camera.position.copy(topDownPosition());
+			camera.lookAt(controls.target);
+		}
 	}
 	addEventListener('resize', resize);
 
 	// 把相机平滑地送到命名预设位，之后不再与 OrbitControls 打架。
 	let glide = null;
+	// 俯瞰时相机高度按视野自适应：棋盘连同字母边框（半边 5.4）
+	// 必须在任何宽高比下都完整入画，取水平/垂直两个方向里更高的那个。
+	function topDownPosition() {
+		const off = state.flipped ? -TOPDOWN.offset : TOPDOWN.offset;
+		const vfov = THREE.MathUtils.degToRad(camera.fov) / 2;
+		const hfov = Math.atan(Math.tan(vfov) * camera.aspect);
+		const height = Math.max(TOPDOWN.fit / Math.tan(vfov), TOPDOWN.fit / Math.tan(hfov));
+		return new THREE.Vector3(controls.target.x, controls.target.y + height, controls.target.z + off);
+	}
+
 	function moveTo(view, { instant = false } = {}) {
 		state.view = view;
 		let target;
 		if (state.topdown) {
-			const off = state.flipped ? -TOPDOWN.offset : TOPDOWN.offset;
-			target = new THREE.Vector3(controls.target.x, controls.target.y + TOPDOWN.radius, controls.target.z + off);
+			target = topDownPosition();
 		} else {
 			const preset = VIEWS[view] || VIEWS.seat;
 			const azimuth = (preset.yaw || 0) + (state.flipped ? Math.PI : 0);
@@ -105,6 +119,14 @@ export function createStage(canvas, quality = 'high') {
 	}
 
 	function step(dt) {
+		// 俯瞰模式优先：相机钉死在正上方，任何其他逻辑都不得碰。
+		if (state.topdown) {
+			glide = null;
+			camera.position.copy(topDownPosition());
+			camera.lookAt(controls.target);
+			return;
+		}
+
 		if (glide) {
 			glide.t = Math.min(1, glide.t + dt / glide.dur);
 			const e = glide.t < 0.5 ? 4 * glide.t ** 3 : 1 - (-2 * glide.t + 2) ** 3 / 2;
@@ -125,14 +147,6 @@ export function createStage(canvas, quality = 'high') {
 		}
 
 		controls.update();
-
-		// 俯瞰时把相机一直按在正上方。轨道已禁用，这里只需
-		// 覆盖 glide 结束后的姿态，保证每帧都钉死。
-		if (state.topdown && !state.attract) {
-			const off = state.flipped ? -TOPDOWN.offset : TOPDOWN.offset;
-			camera.position.set(controls.target.x, controls.target.y + TOPDOWN.radius, controls.target.z + off);
-			camera.lookAt(controls.target);
-		}
 
 		// 菜单占着画面左侧。把视线稍微瞄向棋盘左侧，
 		// 棋盘就留在空出来的右半边——而且这必须放在
@@ -197,23 +211,27 @@ export function createStage(canvas, quality = 'high') {
 			moveTo(state.view);
 			return state.flipped;
 		},
-		// 俯瞰（二维）模式：钉住相机、收窄视野、锁定轨道。
+		// 俯瞰（二维）模式：钉住相机在正上方、锁定轨道。
+		// 退出时必须完整恢复轨道控制——否则回不去 3D，视角也转不动。
 		setTopDown(on) {
 			if (state.topdown === on) return;
 			state.topdown = on;
 			camera.fov = on ? TOPDOWN.fov : 42;
 			camera.updateProjectionMatrix();
-			// 完全禁用轨道——否则 minPolarAngle 会把正上方的相机钳回去，
-			// 和钉住逻辑打架，拾取坐标全歪。
-			controls.enabled = false;
-			controls.enableZoom = !on;
-			controls.enableRotate = !on;
-			controls.enableDamping = !on;
-			moveTo(state.view, { instant: true });
 			if (on) {
-				const off = state.flipped ? -TOPDOWN.offset : TOPDOWN.offset;
-				camera.position.set(controls.target.x, controls.target.y + TOPDOWN.radius, controls.target.z + off);
+				controls.enabled = false;
+				controls.enableZoom = false;
+				controls.enableRotate = false;
+				controls.enableDamping = false;
+				glide = null;
+				camera.position.copy(topDownPosition());
 				camera.lookAt(controls.target);
+			} else {
+				controls.enabled = !state.attract;
+				controls.enableZoom = true;
+				controls.enableRotate = true;
+				controls.enableDamping = true;
+				moveTo(state.view, { instant: true });
 			}
 		},
 		cycleView() {
