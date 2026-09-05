@@ -39,7 +39,7 @@ export function createTable(scene, bursts) {
 		if (badgeIcons) badge.material.map = badge.userData.maps.icon;
 		badge.visible = badgesOn;
 		badge.material.opacity = badgesOn ? 1 : 0;
-		if (badgeIcons) badge.scale.set(0.40, 0.46, 1);
+		if (badgeIcons) badge.scale.set(0.52, 0.60, 1);
 		group.add(badge);
 
 		const entry = { mesh, badge, type, color, sq, lift: 0, selected: false, bob: Math.random() * 6.28 };
@@ -186,7 +186,7 @@ export function createTable(scene, bursts) {
 			badgeIcons = on;
 			for (const entry of bySquare.values()) {
 				entry.badge.material.map = on ? entry.badge.userData.maps.icon : entry.badge.userData.maps.letter;
-				entry.badge.scale.set(on ? 0.40 : 0.26, on ? 0.46 : 0.30, 1);
+				entry.badge.scale.set(on ? 0.52 : 0.26, on ? 0.60 : 0.30, 1);
 			}
 		},
 		update(dt, time) {
