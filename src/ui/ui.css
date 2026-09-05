@@ -444,3 +444,16 @@ body.playing #hud { opacity: 1; }
 	.hud-tools { gap: 4px; }
 	.tb { width: 26px; height: 26px; font-size: 11px; }
 }
+
+/* ── 扁平二维模式的浅色界面 ───────────────────────────────────── */
+
+body.mode2d {
+	--dim: rgba(33, 39, 48, .92);
+	--faint: rgba(33, 39, 48, .60);
+	--ghost: rgba(33, 39, 48, .16);
+	--halo: 0 0 3px rgba(255, 255, 255, .9), 0 1px 4px rgba(255, 255, 255, .75), 0 0 14px rgba(255, 255, 255, .6);
+}
+body.mode2d #ui { text-shadow: var(--halo); }
+body.mode2d .tb,
+body.mode2d .mini { background: rgba(255, 255, 255, .55); border-radius: 8px; }
+body.mode2d .hud-toast { background: rgba(255, 255, 255, .82); color: #212730; text-shadow: none; border-radius: 10px; }

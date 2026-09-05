@@ -88,7 +88,8 @@ export function createBoard(scene) {
 		uTime: { value: 0 },
 		uMarks: { value: marks },
 		uHover: { value: -1 },
-		uHints: { value: 1 }
+		uHints: { value: 1 },
+		uFlat: { value: 0 }
 	};
 
 	const surface = new THREE.MeshPhysicalMaterial({
@@ -114,6 +115,7 @@ export function createBoard(scene) {
 				uniform float uTime;
 				uniform float uHover;
 				uniform float uHints;
+				uniform float uFlat;
 				uniform sampler2D uMarks;
 				varying vec3 vWorld;
 				${NOISE}`)
@@ -135,7 +137,10 @@ export function createBoard(scene) {
 				// 格子之间的发丝凹槽。
 				vec2 edge = min(f, 1.0 - f);
 				float seam = 1.0 - smoothstep(0.0, 0.022, min(edge.x, edge.y));
-				diffuseColor.rgb *= 1.0 - seam * 0.45;`)
+				diffuseColor.rgb *= 1.0 - seam * 0.45 * (1.0 - uFlat);
+
+				// 扁平模式：纯白/浅灰平底，无纹理无凹槽。
+				diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(1.0), vec3(0.792, 0.831, 0.871), dark), uFlat);`)
 			.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
 				{
 					vec2 lp = vWorld.xz + 4.0;
@@ -172,7 +177,13 @@ export function createBoard(scene) {
 						glow += hoverRing * 0.16 * vec3(0.86, 0.93, 1.0);
 					}
 
-					outgoingLight += glow;
+					// 扁平模式跳过着色器辉光（提示由实体网格画），
+					// 且棋盘不被场景光照染色，保持干净的平底色。
+					if (uFlat > 0.5) {
+						outgoingLight = diffuseColor.rgb;
+					} else {
+						outgoingLight += glow;
+					}
 				}
 				#include <opaque_fragment>`);
 	};
@@ -235,10 +246,11 @@ export function createBoard(scene) {
 	const geoRing = new THREE.RingGeometry(0.36, 0.45, 32).rotateX(-Math.PI / 2);
 	const geoSquare = new THREE.PlaneGeometry(0.96, 0.96).rotateX(-Math.PI / 2);
 
-	const matDot = new THREE.MeshBasicMaterial({ color: 0x7fc4ff, transparent: true, opacity: 0.9, depthWrite: false });
-	const matRing = new THREE.MeshBasicMaterial({ color: 0xff8563, transparent: true, opacity: 0.95, depthWrite: false });
-	const matSel = new THREE.MeshBasicMaterial({ color: 0xdcecff, transparent: true, opacity: 0.34, depthWrite: false });
-	const matLast = new THREE.MeshBasicMaterial({ color: 0xf5e9b8, transparent: true, opacity: 0.30, depthWrite: false });
+	// 颜色兼顾深色 3D 棋盘和浅色扁平棋盘。
+	const matDot = new THREE.MeshBasicMaterial({ color: 0x4a9de8, transparent: true, opacity: 0.85, depthWrite: false });
+	const matRing = new THREE.MeshBasicMaterial({ color: 0xef7758, transparent: true, opacity: 0.92, depthWrite: false });
+	const matSel = new THREE.MeshBasicMaterial({ color: 0x74b8ec, transparent: true, opacity: 0.42, depthWrite: false });
+	const matLast = new THREE.MeshBasicMaterial({ color: 0xe8d489, transparent: true, opacity: 0.42, depthWrite: false });
 
 	function overlayMesh(geo, mat, x, y, z) {
 		const m = new THREE.Mesh(geo, mat);
@@ -262,17 +274,20 @@ export function createBoard(scene) {
 		});
 	}
 
-	let overlayOn = false;
+	let touchOverlay = false;  // 触屏设备自动开（手机 GPU 精度不够，着色器提示会丢）
+	let flatOverlay = false;   // 扁平 2D 模式必开（提示就是风格的一部分）
 	let hintsOn = true;
+
+	const overlayOn = () => touchOverlay || flatOverlay;
 
 	function syncOverlay() {
 		for (let i = 0; i < 64; i++) {
 			const cell = overlayCells[i];
 			const base = i * 4;
-			cell.sel.visible = overlayOn && data[base + 0] > 40;
-			cell.dot.visible = overlayOn && hintsOn && data[base + 1] > 40;
-			cell.ring.visible = overlayOn && hintsOn && data[base + 2] > 40;
-			cell.last.visible = overlayOn && data[base + 3] > 40;
+			cell.sel.visible = overlayOn() && data[base + 0] > 40;
+			cell.dot.visible = overlayOn() && hintsOn && data[base + 1] > 40;
+			cell.ring.visible = overlayOn() && hintsOn && data[base + 2] > 40;
+			cell.last.visible = overlayOn() && data[base + 3] > 40;
 		}
 	}
 
@@ -294,9 +309,17 @@ export function createBoard(scene) {
 		setMark, clearMarks,
 		setHover(sq) { uniforms.uHover.value = sq < 0 ? -1 : (sq >> 4) * 8 + (sq & 15); },
 		setHints(on) { hintsOn = on; uniforms.uHints.value = on ? 1 : 0; syncOverlay(); },
-		// 强制启用实体网格提示（触屏/移动端自动开，也可手动开）。
-		setOverlay(on) { overlayOn = on; syncOverlay(); },
-		get overlay() { return overlayOn; },
+		// 强制启用实体网格提示（触屏/移动端自动开）。
+		setOverlay(on) { touchOverlay = on; syncOverlay(); },
+		// 扁平模式：平底格子、隐藏描字边框，提示全部交给实体网格。
+		setFlat(on) {
+			uniforms.uFlat.value = on ? 1 : 0;
+			frame.visible = !on;
+			slab.visible = !on;
+			flatOverlay = on;
+			syncOverlay();
+		},
+		get overlay() { return overlayOn(); },
 		update(_dt, time) { uniforms.uTime.value = time; }
 	};
 }

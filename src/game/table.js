@@ -35,11 +35,13 @@ export function createTable(scene, bursts) {
 		group.add(mesh);
 		meshes.push(mesh);
 
+		mesh.visible = !badgeIcons;
+
 		const badge = createBadge(type, color);
 		if (badgeIcons) badge.material.map = badge.userData.maps.icon;
 		badge.visible = badgesOn;
 		badge.material.opacity = badgesOn ? 1 : 0;
-		if (badgeIcons) badge.scale.set(0.52, 0.60, 1);
+		if (badgeIcons) badge.scale.set(0.72, 0.72, 1);
 		group.add(badge);
 
 		const entry = { mesh, badge, type, color, sq, lift: 0, selected: false, bob: Math.random() * 6.28 };
@@ -181,12 +183,13 @@ export function createTable(scene, bursts) {
 			badgesOn = on;
 			for (const entry of bySquare.values()) entry.badge.visible = on;
 		},
-		// 俯瞰模式：换成棋形图案，并放大到格子里一眼可辨。
+		// 扁平 2D 模式：藏起立体棋子，棋形图标放大撑满格子，直接当棋子。
 		setBadgeIcons(on) {
 			badgeIcons = on;
 			for (const entry of bySquare.values()) {
+				entry.mesh.visible = !on;
 				entry.badge.material.map = on ? entry.badge.userData.maps.icon : entry.badge.userData.maps.letter;
-				entry.badge.scale.set(on ? 0.52 : 0.26, on ? 0.60 : 0.30, 1);
+				entry.badge.scale.set(on ? 0.72 : 0.26, on ? 0.72 : 0.30, 1);
 			}
 		},
 		update(dt, time) {
@@ -210,10 +213,12 @@ export function createTable(scene, bursts) {
 				if (entry.badge.visible) {
 					entry.badge.position.set(
 						entry.mesh.position.x,
-						entry.mesh.position.y + PIECE_TOP[entry.type] + (badgeIcons ? 0.12 : 0.26),
+						badgeIcons ? 0.10 : entry.mesh.position.y + PIECE_TOP[entry.type] + 0.26,
 						entry.mesh.position.z
 					);
-					entry.badge.material.opacity += (1 - entry.badge.material.opacity) * Math.min(1, dt * 6);
+					// 扁平图标准直出，不做淡入——二维界面不应有呼吸感。
+					if (badgeIcons) entry.badge.material.opacity = 1;
+					else entry.badge.material.opacity += (1 - entry.badge.material.opacity) * Math.min(1, dt * 6);
 				}
 			}
 		}

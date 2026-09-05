@@ -2,14 +2,19 @@ import * as THREE from 'three';
 import { PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, WHITE } from '../chess/engine.js';
 
 const LETTER = { [PAWN]: 'P', [KNIGHT]: 'N', [BISHOP]: 'B', [ROOK]: 'R', [QUEEN]: 'Q', [KING]: 'K' };
-const ICON = { [PAWN]: '♟', [KNIGHT]: '♞', [BISHOP]: '♝', [ROOK]: '♜', [QUEEN]: '♛', [KING]: '♚' };
+// 扁平模式：白子用空心字形（白填充+灰描边），黑子用实心字形（深灰平底）——
+// 就是常见二维棋谱的画法。
+const ICON_W = { [PAWN]: '♙', [KNIGHT]: '♘', [BISHOP]: '♗', [ROOK]: '♖', [QUEEN]: '♕', [KING]: '♔' };
+const ICON_B = { [PAWN]: '♟', [KNIGHT]: '♞', [BISHOP]: '♝', [ROOK]: '♜', [QUEEN]: '♛', [KING]: '♚' };
 const cache = new Map();
 
 function badgeTexture(type, color, icon = false) {
 	const key = `${type}:${color}:${icon ? 'icon' : 'letter'}`;
 	if (cache.has(key)) return cache.get(key);
 
-	const W = 128, H = 148, S = 2;
+	const S = 2;
+	// 图标是正方形画布（棋子就是全部内容），字母徽章保留竖版盾牌。
+	const W = icon ? 128 : 128, H = icon ? 128 : 148;
 	const canvas = document.createElement('canvas');
 	canvas.width = W * S;
 	canvas.height = H * S;
@@ -17,26 +22,25 @@ function badgeTexture(type, color, icon = false) {
 	ctx.scale(S, S);
 
 	if (icon) {
-		// 俯瞰模式：画成标准二维棋子的样子——不要底牌，只要棋形。
-		// 白子：象牙白填充 + 深描边；黑子：深黑填充 + 亮描边。
-		// 粗描边 + 软阴影，落在深浅格子上都分得开。
-		const fill = color === WHITE ? '#f6efe0' : '#131b29';
-		const stroke = color === WHITE ? 'rgba(12,19,32,.92)' : 'rgba(238,246,252,.88)';
+		const glyph = color === WHITE ? ICON_W[type] : ICON_B[type];
+		const fill = color === WHITE ? '#ffffff' : '#2e2a26';
+		const stroke = color === WHITE ? '#3a4148' : '#1d1a17';
 		ctx.textAlign = 'center';
 		ctx.textBaseline = 'middle';
-		ctx.font = '108px "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif';
+		ctx.font = '104px "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif';
 		ctx.lineJoin = 'round';
-		ctx.shadowColor = 'rgba(0,3,8,.6)';
-		ctx.shadowBlur = 9;
-		ctx.shadowOffsetY = 3;
-		ctx.lineWidth = 9;
+		// 轻投影，让棋子像贴纸一样落在格子上。
+		ctx.shadowColor = 'rgba(30,34,40,.30)';
+		ctx.shadowBlur = 6;
+		ctx.shadowOffsetY = 4;
+		ctx.lineWidth = color === WHITE ? 9 : 5;
 		ctx.strokeStyle = stroke;
-		ctx.strokeText(ICON[type], 64, 76);
+		ctx.strokeText(glyph, 64, 68);
 		ctx.shadowColor = 'transparent';
 		ctx.shadowBlur = 0;
 		ctx.shadowOffsetY = 0;
 		ctx.fillStyle = fill;
-		ctx.fillText(ICON[type], 64, 76);
+		ctx.fillText(glyph, 64, 68);
 	} else {
 		const tint = color === WHITE ? '#cfe0f8' : '#ff9d86';
 		const ink = color === WHITE ? 'rgba(10,18,32,.82)' : 'rgba(30,10,10,.82)';

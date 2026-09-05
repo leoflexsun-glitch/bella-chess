@@ -18,7 +18,7 @@ const VIEWS = {
 // 俯瞰模式：同一副 3D 棋盘，被钉在正上方 90°。
 // 往 z 轴偏 0.35：太小会让 up 向量与视线平行导致万向锁，
 // 这个偏移同时决定"上"是棋盘的远端（白方视角）。
-const TOPDOWN = { offset: 0.35, fov: 42, fit: 5.4 };
+const TOPDOWN = { offset: 0.35, fov: 42, fit: 4.9 };
 
 export function createStage(canvas, quality = 'high') {
 	const cfg = QUALITY[quality] || QUALITY.high;
@@ -216,6 +216,7 @@ export function createStage(canvas, quality = 'high') {
 		setTopDown(on) {
 			if (state.topdown === on) return;
 			state.topdown = on;
+			post.setFlat(on);
 			camera.fov = on ? TOPDOWN.fov : 42;
 			camera.updateProjectionMatrix();
 			if (on) {
@@ -224,6 +225,10 @@ export function createStage(canvas, quality = 'high') {
 				controls.enableRotate = false;
 				controls.enableDamping = false;
 				glide = null;
+				// 干净浅色背景，不要雪夜的雾。
+				state.savedFog = scene.fog;
+				scene.fog = null;
+				scene.background = new THREE.Color(0xdde4ea);
 				camera.position.copy(topDownPosition());
 				camera.lookAt(controls.target);
 			} else {
@@ -231,6 +236,8 @@ export function createStage(canvas, quality = 'high') {
 				controls.enableZoom = true;
 				controls.enableRotate = true;
 				controls.enableDamping = true;
+				scene.fog = state.savedFog || null;
+				scene.background = null;
 				moveTo(state.view, { instant: true });
 			}
 		},

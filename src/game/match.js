@@ -155,8 +155,9 @@ export function createMatch(hooks = {}) {
 		},
 
 		// 倒回人类玩家的上一回合：他的那步加上对手的回应。
+		// 随时可悔——对手是电脑，思考中、终局后都能悔，连按就连悔。
 		undo() {
-			if (!state.history.length || state.thinking) return false;
+			if (!state.history.length) return false;
 			const target = state.history.findLastIndex(h => h.mover === state.human);
 			if (target < 0) return false;
 			const entry = state.history[target];

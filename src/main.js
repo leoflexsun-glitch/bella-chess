@@ -244,11 +244,18 @@ function setView(value) {
 	const topdown = value === '2d';
 	document.body.classList.toggle('mode2d', topdown);
 	stage.setTopDown(topdown);
+	board.setFlat(topdown);
 	table.setBadgeIcons(topdown);
 	table.setBadges(topdown || settings.badges === 'on');
 	hud.setTool('mode', topdown);
 	hud.setTool('badges', topdown || settings.badges === 'on');
-	if (playing) hud.setHint(topdown ? '俯瞰模式 · 点击棋子拿起，点击格子落子 · V 换回三维' : '拖拽旋转视角 · 点击棋子拿起');
+	// 扁平棋盘点亮时，雪林、灯笼、落雪全部退场——界面风格跟着棋盘走。
+	ground.mesh.visible = !topdown;
+	sky.dome.visible = !topdown;
+	forest.group.visible = !topdown;
+	props.group.visible = !topdown;
+	snowfall.points.visible = topdown ? false : settings.snow !== 'off';
+	if (playing) hud.setHint(topdown ? '二维棋盘 · 点棋子拿起，点格子落子 · V 换回三维' : '拖拽旋转视角 · 点击棋子拿起');
 }
 
 function applySetting(key, value) {
@@ -324,10 +331,14 @@ function review() {
 }
 
 function takeBack() {
-	if (!playing || match.state.over) { audio.deny(); return; }
+	if (!playing) { audio.deny(); return; }
 	clearSelection();
-	if (match.undo()) hud.toast('已悔棋');
-	else audio.deny();
+	const wasOver = Boolean(match.state.over);
+	if (match.undo()) {
+		// 终局后反悔：收起结算屏，接着下。
+		if (wasOver) { paused = false; reviewing = false; menu.hide(); hud.show(); }
+		hud.toast('已悔棋');
+	} else audio.deny();
 }
 
 function endGame(over) {
@@ -433,4 +444,5 @@ const raise = () => {
 };
 requestAnimationFrame(() => requestAnimationFrame(raise));
 setTimeout(raise, 1200);
+
 
