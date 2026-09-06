@@ -213,7 +213,7 @@ export function createTable(scene, bursts) {
 				if (entry.badge.visible) {
 					entry.badge.position.set(
 						entry.mesh.position.x,
-						badgeIcons ? 0.10 : entry.mesh.position.y + PIECE_TOP[entry.type] + 0.26,
+						badgeIcons ? 0.02 : entry.mesh.position.y + PIECE_TOP[entry.type] + 0.26,
 						entry.mesh.position.z
 					);
 					// 扁平图标准直出，不做淡入——二维界面不应有呼吸感。

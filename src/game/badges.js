@@ -7,6 +7,40 @@ const LETTER = { [PAWN]: 'P', [KNIGHT]: 'N', [BISHOP]: 'B', [ROOK]: 'R', [QUEEN]
 const ICON_W = { [PAWN]: '♙', [KNIGHT]: '♘', [BISHOP]: '♗', [ROOK]: '♖', [QUEEN]: '♕', [KING]: '♔' };
 const ICON_B = { [PAWN]: '♟', [KNIGHT]: '♞', [BISHOP]: '♝', [ROOK]: '♜', [QUEEN]: '♛', [KING]: '♚' };
 const cache = new Map();
+const centerCache = new Map();
+
+// 棋子字形在 em 框里的实际墨迹位置随字体/平台而变（兵的视觉中心偏上、
+// 马偏左），硬编码 y 必然画歪。先干画一次量出墨迹包围盒，再补偿偏移，
+// 让每种棋子的墨迹都真正落在画布中心。
+function glyphOffset(glyph, font) {
+	const key = `${glyph}|${font}`;
+	if (centerCache.has(key)) return centerCache.get(key);
+	const probe = document.createElement('canvas');
+	probe.width = probe.height = 128;
+	const c = probe.getContext('2d', { willReadFrequently: true });
+	c.font = font;
+	c.textAlign = 'center';
+	c.textBaseline = 'middle';
+	c.fillStyle = '#000';
+	c.fillText(glyph, 64, 64);
+	const data = c.getImageData(0, 0, 128, 128).data;
+	let x0 = 128, y0 = 128, x1 = -1, y1 = -1;
+	for (let y = 0; y < 128; y++) {
+		for (let x = 0; x < 128; x++) {
+			if (data[(y * 128 + x) * 4 + 3] > 16) {
+				if (x < x0) x0 = x;
+				if (x > x1) x1 = x;
+				if (y < y0) y0 = y;
+				if (y > y1) y1 = y;
+			}
+		}
+	}
+	const offset = x1 >= 0
+		? { x: 64 - (x0 + x1) / 2, y: 64 - (y0 + y1) / 2 }
+		: { x: 0, y: 0 };
+	centerCache.set(key, offset);
+	return offset;
+}
 
 function badgeTexture(type, color, icon = false) {
 	const key = `${type}:${color}:${icon ? 'icon' : 'letter'}`;
@@ -14,7 +48,7 @@ function badgeTexture(type, color, icon = false) {
 
 	const S = 4;
 	// 图标是正方形画布（棋子就是全部内容），字母徽章保留竖版盾牌。
-	const W = icon ? 256 : 128, H = icon ? 256 : 148;
+	const W = 128, H = icon ? 128 : 148;
 	const canvas = document.createElement('canvas');
 	canvas.width = W * S;
 	canvas.height = H * S;
@@ -32,6 +66,8 @@ function badgeTexture(type, color, icon = false) {
 		ctx.textAlign = 'center';
 		ctx.textBaseline = 'middle';
 		ctx.font = '106px "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif';
+		const off = glyphOffset(glyph, ctx.font);
+		const gx = 64 + off.x, gy = 64 + off.y;
 		ctx.lineJoin = 'round';
 		// 轻投影，让棋子像贴纸一样落在格子上。
 		ctx.shadowColor = 'rgba(30,34,40,.34)';
@@ -40,12 +76,12 @@ function badgeTexture(type, color, icon = false) {
 		// 白子描边粗一点，实心字形内部细节（象的切口等）才不会被填充吃掉。
 		ctx.lineWidth = color === WHITE ? 7 : 8;
 		ctx.strokeStyle = stroke;
-		ctx.strokeText(glyph, 64, 68);
+		ctx.strokeText(glyph, gx, gy);
 		ctx.shadowColor = 'transparent';
 		ctx.shadowBlur = 0;
 		ctx.shadowOffsetY = 0;
 		ctx.fillStyle = fill;
-		ctx.fillText(glyph, 64, 68);
+		ctx.fillText(glyph, gx, gy);
 	} else {
 		const tint = color === WHITE ? '#cfe0f8' : '#ff9d86';
 		const ink = color === WHITE ? 'rgba(10,18,32,.82)' : 'rgba(30,10,10,.82)';

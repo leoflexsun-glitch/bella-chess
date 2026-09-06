@@ -446,5 +446,3 @@ const raise = () => {
 };
 requestAnimationFrame(() => requestAnimationFrame(raise));
 setTimeout(raise, 1200);
-
-

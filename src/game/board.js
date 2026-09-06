@@ -239,8 +239,8 @@ export function createBoard(scene) {
 	// 可看了。这里画一块带坐标的透明底板垫在棋盘下，仅扁平模式显示。
 	// 坐标画在格子内角：纵坐标 1–8 在 a 列每格左上角，横坐标 a–h 在第 1 横排
 	// 每格右下角（Lichess 风格）——不额外占边框，棋盘可以占满整个视野。
-	// 颜色随格子走：浅格上的字用深色，深格上的字用浅色，哪都看得清。
-	const SQ = 256, ON_LIGHT = '#7a9588', ON_DARK = '#f0ecd8'; // 浅格上压深色字，深格上压浅色字
+	// 这套棋盘的深格其实也只是灰绿浅色，所以坐标在两类格子上都用深灰绿，哪都看得清。
+	const SQ = 256, ON_LIGHT = '#42564b', ON_DARK = '#24332c'; // 这套扁平棋盘的两色都偏浅，坐标统一用深灰绿才压得住
 	function drawCoords(files, ranks) {
 		const cv = document.createElement('canvas');
 		cv.width = cv.height = SQ * 8;
