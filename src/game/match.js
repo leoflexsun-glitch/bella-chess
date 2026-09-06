@@ -84,7 +84,7 @@ export function createMatch(hooks = {}) {
 		const captured = move.captured;
 		makeMove(state.pos, move);
 
-		state.clocks[mover] += state.increment;
+		if (state.timed !== false) state.clocks[mover] += state.increment;
 		state.lastMove = move;
 		state.history.push({ san, move, before, mover, captured, ...meta });
 
@@ -132,6 +132,7 @@ export function createMatch(hooks = {}) {
 			state.level = level;
 			state.clocks = { [WHITE]: minutes * 60000, [BLACK]: minutes * 60000 };
 			state.increment = increment * 1000;
+			state.timed = false; // 用户要求：不要倒计时，轻松下棋不读秒
 			state.thinking = false;
 			state.over = null;
 			state.eval = 0;
@@ -182,7 +183,7 @@ export function createMatch(hooks = {}) {
 		},
 
 		tick(dt) {
-			if (state.over || !state.started) return;
+			if (state.over || !state.started || state.timed === false) return;
 			const side = state.pos.turn;
 			state.clocks[side] = Math.max(0, state.clocks[side] - dt * 1000);
 			if (state.clocks[side] === 0) finish('flag fall', other(side));

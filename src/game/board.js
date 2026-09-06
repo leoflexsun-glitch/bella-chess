@@ -140,7 +140,7 @@ export function createBoard(scene) {
 				diffuseColor.rgb *= 1.0 - seam * 0.45 * (1.0 - uFlat);
 
 				// 扁平模式：纯白/浅灰平底，无纹理无凹槽。
-				diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(1.0), vec3(0.792, 0.831, 0.871), dark), uFlat);`)
+				diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.941, 0.925, 0.847), vec3(0.475, 0.588, 0.541), dark), uFlat);`)
 			.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
 				{
 					vec2 lp = vWorld.xz + 4.0;
@@ -237,27 +237,31 @@ export function createBoard(scene) {
 	// ── 扁平模式的坐标牌 ────────────────────────────────────
 	// 坐标原本烘在边框上，扁平模式没有边框，棋盘四周就没有 a–h / 1–8
 	// 可看了。这里画一块带坐标的透明底板垫在棋盘下，仅扁平模式显示。
-	const COORDS_PX = 940; // 9.4 世界单位 × 100px
-	// 横坐标在底边、纵坐标沿左边，按"屏幕正视角"画一张；
-	// files/ranks 按视角传入。canvas 顶边 = 世界 -z。
+	// 坐标画在格子内角：纵坐标 1–8 在 a 列每格左上角，横坐标 a–h 在第 1 横排
+	// 每格右下角（Lichess 风格）——不额外占边框，棋盘可以占满整个视野。
+	// 颜色随格子走：浅格上的字用深色，深格上的字用浅色，哪都看得清。
+	const SQ = 160, ON_LIGHT = '#7a9588', ON_DARK = '#f0ecd8'; // 浅格上压深色字，深格上压浅色字
 	function drawCoords(files, ranks) {
 		const cv = document.createElement('canvas');
-		cv.width = cv.height = COORDS_PX;
+		cv.width = cv.height = SQ * 8;
 		const c = cv.getContext('2d');
-		const margin = (COORDS_PX - 800) / 2; // 棋盘占中间 8×100px
-		c.fillStyle = 'rgba(33, 39, 48, .58)';
-		c.font = '600 36px "Geist", system-ui, sans-serif';
-		c.textAlign = 'center';
-		c.textBaseline = 'middle';
+		c.font = `700 44px "Geist", system-ui, sans-serif`;
 		for (let i = 0; i < 8; i++) {
-			const p = margin + (i + 0.5) * 100;
-			c.fillText(files[i], p, COORDS_PX - margin / 2);
-			c.fillText(String(ranks[i]), margin / 2, p);
+			// 纵坐标：a 列（列 0），每行左上角；格色 = (行+列) 偶为浅。
+			c.textAlign = 'left';
+			c.textBaseline = 'top';
+			c.fillStyle = i % 2 === 0 ? ON_LIGHT : ON_DARK; // 顶行 (8 行) 是浅格
+			c.fillText(String(ranks[i]), 10, i * SQ + 8);
+			// 横坐标：第 1 横排（行 7），每列右下角。
+			c.textAlign = 'right';
+			c.textBaseline = 'alphabetic';
+			c.fillStyle = (7 + i) % 2 === 0 ? ON_LIGHT : ON_DARK;
+			c.fillText(files[i], (i + 1) * SQ - 10, 8 * SQ - 12);
 		}
 		return cv;
 	}
 	// 翻转视角 = 世界→屏幕转了 180°：把"黑方视角"的坐标画好再整个转 180°，
-	// 上屏后字才是正的，且底边读 h–a、左边读 1–8。
+	// 上屏后字才是正的。
 	function rotate180(src) {
 		const cv = document.createElement('canvas');
 		cv.width = cv.height = src.width;
@@ -271,10 +275,10 @@ export function createBoard(scene) {
 	const coordTexFlip = new THREE.CanvasTexture(rotate180(drawCoords('hgfedcba', [1, 2, 3, 4, 5, 6, 7, 8])));
 	for (const t of [coordTex, coordTexFlip]) { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; }
 	const coords = new THREE.Mesh(
-		new THREE.PlaneGeometry(9.4, 9.4).rotateX(-Math.PI / 2),
+		new THREE.PlaneGeometry(8, 8).rotateX(-Math.PI / 2),
 		new THREE.MeshBasicMaterial({ map: coordTex, transparent: true, depthWrite: false })
 	);
-	coords.position.y = 0.008; // 棋盘面之下、石板之上
+	coords.position.y = 0.016; // 略压过棋盘面，但低于提示网格（0.02）
 	coords.visible = false;
 	group.add(coords);
 
@@ -286,8 +290,8 @@ export function createBoard(scene) {
 	overlay.position.y = 0.02; // 略高于冰面，避免 z-fighting
 	group.add(overlay);
 
-	const geoDot = new THREE.CircleGeometry(0.14, 24).rotateX(-Math.PI / 2);
-	const geoRing = new THREE.RingGeometry(0.36, 0.45, 32).rotateX(-Math.PI / 2);
+	const geoDot = new THREE.CircleGeometry(0.16, 24).rotateX(-Math.PI / 2);
+	const geoRing = new THREE.RingGeometry(0.34, 0.45, 32).rotateX(-Math.PI / 2);
 	const geoSquare = new THREE.PlaneGeometry(0.96, 0.96).rotateX(-Math.PI / 2);
 
 	// 颜色兼顾深色 3D 棋盘和浅色扁平棋盘。

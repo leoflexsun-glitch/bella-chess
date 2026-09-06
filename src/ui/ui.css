@@ -237,6 +237,8 @@ body.playing #hud { opacity: 1; }
 	gap: 1px;
 	min-width: 226px;
 }
+/* 不限时对局：隐藏读秒数字，只留名字和行棋指示。 */
+.hud-clocks .clock { display: none; }
 .hud-clocks .side {
 	display: grid;
 	grid-template-columns: 5px 82px 1fr auto;
@@ -459,7 +461,7 @@ body.mode2d .mini { background: rgba(255, 255, 255, .55); border-radius: 8px; }
 body.mode2d .hud-toast { background: rgba(255, 255, 255, .82); color: #212730; text-shadow: none; border-radius: 10px; }
 
 /* 二维模式：所有 HUD 文字加大、加粗、加深——10px 细体在浅底上没法看。 */
-body.mode2d .hud-clocks .side { grid-template-columns: 7px 96px 1fr auto; padding: 11px 2px; }
+body.mode2d .hud-clocks .side { grid-template-columns: 7px 1fr auto; padding: 11px 2px; }
 body.mode2d .hud-clocks .side::before { width: 7px; height: 7px; }
 body.mode2d .hud-clocks .side.act::before { background: #2f6db3; box-shadow: 0 0 8px rgba(47, 109, 179, .6); }
 body.mode2d .hud-clocks .tag { font-size: 13px; letter-spacing: .18em; color: var(--dim); }

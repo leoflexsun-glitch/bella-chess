@@ -189,7 +189,7 @@ export function createTable(scene, bursts) {
 			for (const entry of bySquare.values()) {
 				entry.mesh.visible = !on;
 				entry.badge.material.map = on ? entry.badge.userData.maps.icon : entry.badge.userData.maps.letter;
-				entry.badge.scale.set(on ? 0.72 : 0.26, on ? 0.72 : 0.30, 1);
+				entry.badge.scale.set(on ? 0.80 : 0.26, on ? 0.80 : 0.30, 1);
 			}
 		},
 		update(dt, time) {
