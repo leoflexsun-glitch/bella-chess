@@ -12,9 +12,9 @@ function badgeTexture(type, color, icon = false) {
 	const key = `${type}:${color}:${icon ? 'icon' : 'letter'}`;
 	if (cache.has(key)) return cache.get(key);
 
-	const S = 2;
+	const S = 4;
 	// 图标是正方形画布（棋子就是全部内容），字母徽章保留竖版盾牌。
-	const W = icon ? 128 : 128, H = icon ? 128 : 148;
+	const W = icon ? 256 : 128, H = icon ? 256 : 148;
 	const canvas = document.createElement('canvas');
 	canvas.width = W * S;
 	canvas.height = H * S;
@@ -78,7 +78,7 @@ function badgeTexture(type, color, icon = false) {
 
 	const texture = new THREE.CanvasTexture(canvas);
 	texture.colorSpace = THREE.SRGBColorSpace;
-	texture.anisotropy = 4;
+	texture.anisotropy = 8;
 	cache.set(key, texture);
 	return texture;
 }

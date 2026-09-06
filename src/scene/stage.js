@@ -28,10 +28,10 @@ export function createStage(canvas, quality = 'high') {
 	const viewport = () => [Math.max(1, innerWidth), Math.max(1, innerHeight)];
 
 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', stencil: false });
-	// 无 GPU 的软件渲染（沙盒/远程无头环境）扛不住高像素比，
-	// 直接锁 1——反正本来就跑不满帧。
-	const softGL = (renderer.getContext().getParameter(renderer.getContext().RENDERER) || '').match(/swiftshader|llvmpipe|software/i);
-	renderer.setPixelRatio(softGL ? 1 : Math.min(devicePixelRatio, cfg.pixel));
+	// 像素比按设备能力给足（Retina/高刷屏 2×），画面才不糊。
+	// 软件渲染（无 GPU 的沙盒/远程环境）也不锁分辨率——宁可慢一点也不糊；
+	// 真有性能问题，下面的自适应降档会接管。
+	renderer.setPixelRatio(Math.min(devicePixelRatio || 1, cfg.pixel));
 	renderer.setSize(...viewport());
 	renderer.outputColorSpace = THREE.SRGBColorSpace;
 	renderer.toneMapping = THREE.ACESFilmicToneMapping;

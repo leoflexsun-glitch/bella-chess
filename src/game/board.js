@@ -240,23 +240,23 @@ export function createBoard(scene) {
 	// 坐标画在格子内角：纵坐标 1–8 在 a 列每格左上角，横坐标 a–h 在第 1 横排
 	// 每格右下角（Lichess 风格）——不额外占边框，棋盘可以占满整个视野。
 	// 颜色随格子走：浅格上的字用深色，深格上的字用浅色，哪都看得清。
-	const SQ = 160, ON_LIGHT = '#7a9588', ON_DARK = '#f0ecd8'; // 浅格上压深色字，深格上压浅色字
+	const SQ = 256, ON_LIGHT = '#7a9588', ON_DARK = '#f0ecd8'; // 浅格上压深色字，深格上压浅色字
 	function drawCoords(files, ranks) {
 		const cv = document.createElement('canvas');
 		cv.width = cv.height = SQ * 8;
 		const c = cv.getContext('2d');
-		c.font = `700 44px "Geist", system-ui, sans-serif`;
+		c.font = `700 70px "Geist", system-ui, sans-serif`;
 		for (let i = 0; i < 8; i++) {
 			// 纵坐标：a 列（列 0），每行左上角；格色 = (行+列) 偶为浅。
 			c.textAlign = 'left';
 			c.textBaseline = 'top';
 			c.fillStyle = i % 2 === 0 ? ON_LIGHT : ON_DARK; // 顶行 (8 行) 是浅格
-			c.fillText(String(ranks[i]), 10, i * SQ + 8);
+			c.fillText(String(ranks[i]), 14, i * SQ + 10);
 			// 横坐标：第 1 横排（行 7），每列右下角。
 			c.textAlign = 'right';
 			c.textBaseline = 'alphabetic';
 			c.fillStyle = (7 + i) % 2 === 0 ? ON_LIGHT : ON_DARK;
-			c.fillText(files[i], (i + 1) * SQ - 10, 8 * SQ - 12);
+			c.fillText(files[i], (i + 1) * SQ - 14, 8 * SQ - 16);
 		}
 		return cv;
 	}
@@ -273,7 +273,7 @@ export function createBoard(scene) {
 	}
 	const coordTex = new THREE.CanvasTexture(drawCoords('abcdefgh', [8, 7, 6, 5, 4, 3, 2, 1]));
 	const coordTexFlip = new THREE.CanvasTexture(rotate180(drawCoords('hgfedcba', [1, 2, 3, 4, 5, 6, 7, 8])));
-	for (const t of [coordTex, coordTexFlip]) { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; }
+	for (const t of [coordTex, coordTexFlip]) { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; }
 	const coords = new THREE.Mesh(
 		new THREE.PlaneGeometry(8, 8).rotateX(-Math.PI / 2),
 		new THREE.MeshBasicMaterial({ map: coordTex, transparent: true, depthWrite: false })
