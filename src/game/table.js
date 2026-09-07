@@ -18,6 +18,7 @@ export function createTable(scene, bursts) {
 
 	const geometries = pieceGeometries();
 	const bySquare = new Map();
+	const vanishingPieces = new Set();
 	const tweens = [];
 	const meshes = [];
 	let badgesOn = false;
@@ -41,7 +42,7 @@ export function createTable(scene, bursts) {
 		if (badgeIcons) badge.material.map = badge.userData.maps.icon;
 		badge.visible = badgesOn;
 		badge.material.opacity = badgesOn ? 1 : 0;
-		if (badgeIcons) badge.scale.set(0.72, 0.72, 1);
+		if (badgeIcons) badge.scale.set(0.80, 0.80, 1);
 		group.add(badge);
 
 		const entry = { mesh, badge, type, color, sq, lift: 0, selected: false, bob: Math.random() * 6.28 };
@@ -53,12 +54,17 @@ export function createTable(scene, bursts) {
 		group.remove(entry.mesh, entry.badge);
 		entry.mesh.material.dispose();
 		entry.badge.material.dispose();
-		meshes.splice(meshes.indexOf(entry.mesh), 1);
+		const mi = meshes.indexOf(entry.mesh);
+		if (mi >= 0) meshes.splice(mi, 1);
 	}
 
 	function clear() {
 		for (const entry of bySquare.values()) destroy(entry);
 		bySquare.clear();
+		// 正在碎裂的棋子已不在 bySquare 里，这里一并销毁；
+		// 否则悔棋/重开发生在碎裂窗口内时，2D 图标会冻结成残影。
+		for (const entry of vanishingPieces) destroy(entry);
+		vanishingPieces.clear();
 		tweens.length = 0;
 	}
 
@@ -80,12 +86,27 @@ export function createTable(scene, bursts) {
 	function vanish(entry) {
 		const from = entry.mesh.position.clone();
 		bySquare.delete(entry.sq);
-		entry.badge.visible = false;
+		entry.vanishing = true;
+		vanishingPieces.add(entry);
+		// 2D 模式下图标就是棋子本体，必须跟着碎裂动画一起缩小消失；
+		// 3D 模式徽章照旧直接隐藏。
+		const badgeScale = entry.badge.scale.x;
+		if (badgeIcons) {
+			entry.badge.position.copy(from).setY(0.02);
+		} else {
+			entry.badge.visible = false;
+		}
 		tween(0.52, k => {
 			entry.mesh.position.y = from.y + easeOut(k) * 0.7;
 			entry.mesh.rotation.y += 0.16;
 			entry.mesh.scale.setScalar(Math.max(0.001, 1 - easeOut(k)));
+			if (badgeIcons) {
+				const s = Math.max(0.001, badgeScale * (1 - easeOut(k)));
+				entry.badge.scale.set(s, s, 1);
+				entry.badge.material.opacity = 1 - easeOut(k);
+			}
 		}, () => {
+			vanishingPieces.delete(entry);
 			bursts.emit(from.clone().setY(from.y + 0.3), 34, {
 				color: SHARD[entry.color], spread: 1.9, rise: 1.4, size: 5.5, life: 0.9
 			});
@@ -128,6 +149,11 @@ export function createTable(scene, bursts) {
 						mover.type = move_.promotion;
 						mover.mesh.geometry = geometries[move_.promotion];
 						const swap = createBadge(move_.promotion, mover.color);
+						// 2D 模式：升变后的新徽章同样用棋形图标大图标，别缩成小字母牌。
+						if (badgeIcons) {
+							swap.material.map = swap.userData.maps.icon;
+							swap.scale.set(0.80, 0.80, 1);
+						}
 						swap.visible = mover.badge.visible;
 						swap.material.opacity = mover.badge.material.opacity;
 						group.remove(mover.badge);
@@ -200,6 +226,7 @@ export function createTable(scene, bursts) {
 				if (tw.t >= 1) { tweens.splice(i, 1); tw.done?.(); }
 			}
 			for (const entry of bySquare.values()) {
+				if (entry.vanishing) continue; // 碎裂动画自管网格与图标，别拽回来
 				const glow = entry.mesh.material.userData.uniforms.uLift;
 				glow.value += ((entry.selected ? 0.55 : 0) - glow.value) * Math.min(1, dt * 8);
 
