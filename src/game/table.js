@@ -92,6 +92,9 @@ export function createTable(scene, bursts) {
 		// 3D 模式徽章照旧直接隐藏。
 		const badgeScale = entry.badge.scale.x;
 		if (badgeIcons) {
+			// 2D 模式把被吃棋子的图标锁进公告板渲染层级，
+			// 碎裂缩小期间不会被吃子方棋子的透明描边残影盖住。
+			entry.badge.renderOrder = 7;
 			entry.badge.position.copy(from).setY(0.02);
 		} else {
 			entry.badge.visible = false;
