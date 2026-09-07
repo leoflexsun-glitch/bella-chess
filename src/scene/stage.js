@@ -27,6 +27,13 @@ export function createStage(canvas, quality = 'high') {
 	// 那会让每个渲染目标都不完整。
 	const viewport = () => [Math.max(1, innerWidth), Math.max(1, innerHeight)];
 
+	// 单文件部署兜底：托管环境若只放行了内联后的 index.html，
+	// 这里读不到真正的 canvas 元素，至少要能造出离屏画布继续渲染。
+	if (!canvas || !canvas.getContext) {
+		canvas = document.createElement('canvas');
+		canvas.id = 'stage';
+		document.body.prepend(canvas);
+	}
 	const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', stencil: false });
 	// 像素比按设备能力给足（Retina/高刷屏 2×），画面才不糊。
 	// 软件渲染（无 GPU 的沙盒/远程环境）也不锁分辨率——宁可慢一点也不糊；

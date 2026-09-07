@@ -19,7 +19,13 @@ const PACE = {
 const positionKey = pos => toFen(pos).split(' ').slice(0, 4).join(' ');
 
 export function createMatch(hooks = {}) {
-	const worker = new Worker(new URL('../chess/worker.js', import.meta.url), { type: 'module' });
+	// 单文件部署：worker 代码在打包时内联成字符串，Blob 化使用；多文件开发环境回退到原路径。
+	const worker = (() => {
+		if (typeof __INLINE_WORKER__ === 'string') {
+			return new Worker(URL.createObjectURL(new Blob([__INLINE_WORKER__], { type: 'application/javascript' })));
+		}
+		return new Worker(new URL('../chess/worker.js', import.meta.url), { type: 'module' });
+	})();
 	let requestId = 0;
 
 	const state = {

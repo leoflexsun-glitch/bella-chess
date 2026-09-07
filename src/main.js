@@ -60,7 +60,8 @@ const bursts = createBursts(scene);
 	pmrem.dispose();
 }
 
-await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 2500))]);
+// 字体就绪前不建棋盘（棋子纹理要等字形），但顶层 await 会挡打包，用微任务代替。
+let fontReady = Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 2500))]);
 
 const board = createBoard(scene);
 const table = createTable(scene, bursts);
