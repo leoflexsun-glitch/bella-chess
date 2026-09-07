@@ -60,9 +60,9 @@ function badgeTexture(type, color, icon = false) {
 		// 只靠颜色区分敌我：白子=白填充+深描边，黑子=纯深填充。
 		// 空心字形 ♗/♙ 缩到棋子大小时轮廓几乎一样，分不清象和兵。
 		const glyph = ICON_B[type];
-		// 加粗黑子填充（双笔画），在浅色格子上也压得住。
+		// 黑子：黑填充 + 白色条纹勾勒轮廓，不然糊成一块看不清是什么子。
 		const fill = color === WHITE ? '#ffffff' : '#1c1916';
-		const stroke = color === WHITE ? '#333a42' : '#161310';
+		const stroke = color === WHITE ? '#333a42' : '#f2ece2';
 		ctx.textAlign = 'center';
 		ctx.textBaseline = 'middle';
 		ctx.font = '106px "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif';
@@ -73,8 +73,9 @@ function badgeTexture(type, color, icon = false) {
 		ctx.shadowColor = 'rgba(30,34,40,.34)';
 		ctx.shadowBlur = 5;
 		ctx.shadowOffsetY = 3;
-		// 白子描边粗一点，实心字形内部细节（象的切口等）才不会被填充吃掉。
-		ctx.lineWidth = color === WHITE ? 7 : 8;
+		// 描边粗一点，实心字形内部细节（象的切口等）才不会被填充吃掉；
+		// 黑子的白色条纹再粗半档，浅格深格上都立得住。
+		ctx.lineWidth = color === WHITE ? 7 : 9;
 		ctx.strokeStyle = stroke;
 		ctx.strokeText(glyph, gx, gy);
 		ctx.shadowColor = 'transparent';
