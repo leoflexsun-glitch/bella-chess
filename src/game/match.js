@@ -163,10 +163,20 @@ export function createMatch(hooks = {}) {
 
 		// 倒回人类玩家的上一回合：他的那步加上对手的回应。
 		// 随时可悔——对手是电脑，思考中、终局后都能悔，连按就连悔。
-		undo() {
+		// plies = 要回退的步数（默认回退到人类上一手：自己那步 + 对手回应）。
+		// 连按悔棋时每按一次多退两手，不会出现"按了没反应"。
+		undo(plies = 0) {
 			if (!state.history.length) return false;
-			const target = state.history.findLastIndex(h => h.mover === state.human);
-			if (target < 0) return false;
+			let target;
+			if (plies > 0) {
+				target = Math.max(0, state.history.length - plies);
+				// 目标不能停在对手着法中间——退到完整回合边界。
+				const last = state.history[target - 1];
+				if (last && last.mover !== state.human) target = Math.max(0, target - 1);
+			} else {
+				target = state.history.findLastIndex(h => h.mover === state.human);
+				if (target < 0) return false;
+			}
 			const entry = state.history[target];
 			state.history = state.history.slice(0, target);
 			state.pos = fromFen(entry.before);

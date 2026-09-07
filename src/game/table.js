@@ -202,6 +202,9 @@ export function createTable(scene, bursts) {
 		meshes,
 		sync,
 		playMove,
+		// 所有走子/碎裂动画都已落定（悔棋重建前必须满足，
+		// 否则进行中的 tween 闭包会抓住旧棋子不放，重建后回写出残子）。
+		isIdle: () => tweens.length === 0,
 		select,
 		at: sq => bySquare.get(sq),
 		squareOfMesh(mesh) {

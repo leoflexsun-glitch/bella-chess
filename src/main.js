@@ -333,11 +333,33 @@ function review() {
 	hud.toast('正在研究终局局面 · 按 Esc 离开');
 }
 
+let undoPliesQueued = 0;
+let undoTimer = 0;
+
 function takeBack() {
 	if (!playing) { audio.deny(); return; }
 	clearSelection();
+	if (!table.isIdle()) {
+		// 走子/碎裂动画进行中：立即悔棋会触发重建与旧 tween 回写打架，
+		// 出现"悔棋后棋子还在原位置/多出棋子"。记下这次悔棋（可累加），动画落定后一次性执行。
+		undoPliesQueued += 2;
+		hud.toast('落定后自动悔棋…', 900);
+		if (!undoTimer) undoTimer = setInterval(() => {
+			if (!table.isIdle()) return;
+			clearInterval(undoTimer);
+			undoTimer = 0;
+			const n = undoPliesQueued;
+			undoPliesQueued = 0;
+			doUndo(n);
+		}, 100);
+		return;
+	}
+	doUndo(0);
+}
+
+function doUndo(plies) {
 	const wasOver = Boolean(match.state.over);
-	if (match.undo()) {
+	if (match.undo(plies)) {
 		// 终局后反悔：收起结算屏，接着下。
 		if (wasOver) { paused = false; reviewing = false; menu.hide(); hud.show(); }
 		hud.toast('已悔棋');
