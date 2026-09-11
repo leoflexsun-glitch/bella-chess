@@ -60,8 +60,10 @@ function badgeTexture(type, color, icon = false) {
 		// 只靠颜色区分敌我：白子=白填充+深描边，黑子=纯深填充。
 		// 空心字形 ♗/♙ 缩到棋子大小时轮廓几乎一样，分不清象和兵。
 		const glyph = ICON_B[type];
-		// 黑子：黑填充 + 白色条纹勾勒轮廓，不然糊成一块看不清是什么子。
-		const fill = color === WHITE ? '#ffffff' : '#1c1916';
+		// 黑子：暖灰底（不是死黑）+ 加粗白色条纹勾勒轮廓。
+		// 深格上死黑会沉进去糊成一块，抬高底色让它在任何格子上都立得住、
+		// 一眼分清是什么子（用户手机实测黑兵黑后排无法辨认）。
+		const fill = color === WHITE ? '#ffffff' : '#38322c';
 		const stroke = color === WHITE ? '#333a42' : '#f2ece2';
 		ctx.textAlign = 'center';
 		ctx.textBaseline = 'middle';
