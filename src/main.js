@@ -106,6 +106,10 @@ const match = createMatch({
 	},
 	onMove: (move, { san, mover, captured }) => {
 		table.playMove(move);
+		// 动画落定后对一次账：桌面棋子与逻辑状态不一致（残子/缺子）立即自愈并留日志。
+		// 引擎着法也要审计（引擎吃你子时同样是竞态高发区）。
+		const auditOnce = () => { if (table.isIdle()) table.audit(match.state.pos); else setTimeout(auditOnce, 120); };
+		setTimeout(auditOnce, 60);
 		if (captured) audio.capture(); else audio.place();
 		selected = -1;
 		legal = [];
@@ -181,12 +185,17 @@ function pick(event) {
 	pointer.set((event.clientX / innerWidth) * 2 - 1, -(event.clientY / innerHeight) * 2 + 1);
 	raycaster.setFromCamera(pointer, camera);
 	const onPiece = raycaster.intersectObjects(table.meshes, false)[0];
+	let result;
 	if (onPiece) {
 		const sq = table.squareOfMesh(onPiece.object);
-		if (sq >= 0) return sq;
+		if (sq >= 0) result = sq;
 	}
-	const onBoard = raycaster.intersectObject(board.field, false)[0];
-	return onBoard ? worldToSquare(onBoard.point) : -1;
+	if (result === undefined) {
+		const onBoard = raycaster.intersectObject(board.field, false)[0];
+		result = onBoard ? worldToSquare(onBoard.point) : -1;
+	}
+	window.__PICK_DEBUG = { x: event.clientX, y: event.clientY, piece: onPiece ? onPiece.object.uuid.slice(0, 6) : null, sq: result, ts: performance.now() };
+	return result;
 }
 
 canvas.addEventListener('pointermove', event => {
@@ -199,12 +208,13 @@ canvas.addEventListener('pointerdown', event => {
 });
 
 function clickSquare(sq) {
-	if (!playing || paused || hud.promoting) return;
-	if (sq < 0) { clearSelection(); return; }
+	if (!playing || paused || hud.promoting) { window.__CLICK_DEBUG = { sq, reason: 'blocked', playing, paused }; return; }
+	if (sq < 0) { window.__CLICK_DEBUG = { sq, reason: 'miss' }; clearSelection(); return; }
 
 	if (selected >= 0 && attempt(sq)) return;
 
 	const piece = match.state.pos.board[sq];
+	window.__CLICK_DEBUG = { sq, piece, selectedBefore: selected, human: match.state.human, over: Boolean(match.state.over) };
 	if (piece && colorOf(piece) === match.state.human && !match.state.over) {
 		if (sq === selected) clearSelection();
 		else selectSquare(sq);
@@ -409,6 +419,13 @@ function handleTool(tool) {
 		navigator.clipboard?.writeText(match.pgn()).then(
 			() => hud.toast('棋谱已复制'),
 			() => hud.toast('剪贴板不可用')
+		);
+	}
+	else if (tool === 'log') {
+		const log = (window.__CHESS_LOG || []).join('\n');
+		navigator.clipboard?.writeText(log).then(
+			() => hud.toast(`诊断日志已复制（${log.split('\n').filter(Boolean).length} 条）`),
+			() => hud.toast('剪贴板不可用，日志在 window.__CHESS_LOG')
 		);
 	}
 }

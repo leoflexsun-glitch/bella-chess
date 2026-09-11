@@ -12,6 +12,17 @@ const SHARD = { [WHITE]: new THREE.Color(0xf3e6cc), [BLACK]: new THREE.Color(0x7
 const easeOut = t => 1 - (1 - t) ** 3;
 const easeInOut = t => t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
 
+// ── 诊断日志：吃子/销毁/悔棋全程留痕，出现残影时可一键导出 ──
+const CHESS_LOG = [];
+const LOG_MAX = 400;
+function logEvent(type, detail = '') {
+	const line = `${new Date().toISOString().slice(11, 19)} ${type} ${detail}`;
+	CHESS_LOG.push(line);
+	if (CHESS_LOG.length > LOG_MAX) CHESS_LOG.splice(0, CHESS_LOG.length - LOG_MAX);
+	if (typeof window !== 'undefined') window.__CHESS_LOG = CHESS_LOG;
+}
+if (typeof window !== 'undefined') window.__CHESS_LOG = CHESS_LOG;
+
 export function createTable(scene, bursts) {
 	const group = new THREE.Group();
 	scene.add(group);
@@ -59,6 +70,7 @@ export function createTable(scene, bursts) {
 	}
 
 	function clear() {
+		logEvent('CLEAR', `bySq=${bySquare.size} vanishing=${vanishingPieces.size} tweens=${tweens.length}`);
 		for (const entry of bySquare.values()) destroy(entry);
 		bySquare.clear();
 		// 正在碎裂的棋子已不在 bySquare 里，这里一并销毁；
@@ -71,6 +83,7 @@ export function createTable(scene, bursts) {
 	function sync(pos) {
 		clear();
 		for (const { sq, type, color } of pieceList(pos)) spawn(type, color, sq);
+		logEvent('SYNC', `spawned=${bySquare.size}`);
 	}
 
 	function move(entry, sq) {
@@ -88,6 +101,7 @@ export function createTable(scene, bursts) {
 		bySquare.delete(entry.sq);
 		entry.vanishing = true;
 		vanishingPieces.add(entry);
+		logEvent('VANISH', `${entry.color===WHITE?'W':'B'}${entry.type}@sq${entry.sq} tweens=${tweens.length}`);
 		// 2D 模式下图标就是棋子本体，必须跟着碎裂动画一起缩小消失；
 		// 3D 模式徽章照旧直接隐藏。
 		const badgeScale = entry.badge.scale.x;
@@ -95,6 +109,7 @@ export function createTable(scene, bursts) {
 			// 2D 模式把被吃棋子的图标锁进公告板渲染层级，
 			// 碎裂缩小期间不会被吃子方棋子的透明描边残影盖住。
 			entry.badge.renderOrder = 7;
+			entry.badge.visible = true;
 			entry.badge.position.copy(from).setY(0.02);
 		} else {
 			entry.badge.visible = false;
@@ -113,6 +128,7 @@ export function createTable(scene, bursts) {
 			bursts.emit(from.clone().setY(from.y + 0.3), 34, {
 				color: SHARD[entry.color], spread: 1.9, rise: 1.4, size: 5.5, life: 0.9
 			});
+			logEvent('VANISH-DONE', `sq${entry.sq} vanishing=${vanishingPieces.size} bySq=${bySquare.size}`);
 			destroy(entry);
 		});
 	}
@@ -122,7 +138,20 @@ export function createTable(scene, bursts) {
 		if (!mover) { onDone?.(); return; }
 
 		const captureSq = move_.flags & EP ? move_.to + (colorOf(move_.piece) === WHITE ? 16 : -16) : move_.to;
-		const victim = move_.captured ? bySquare.get(captureSq) : null;
+		let victim = move_.captured ? bySquare.get(captureSq) : null;
+		// 快棋竞态：对方吃子后目标棋子仍在 0.52s 碎裂中，已不在 bySquare，
+		// 而它"占了"的格子我们立刻要吃/落子。把它从碎裂集合里捞出来立刻销毁。
+		if (move_.captured && !victim) {
+			for (const entry of vanishingPieces) {
+				if (entry.sq === captureSq) { victim = entry; break; }
+			}
+			if (victim) {
+				vanishingPieces.delete(victim);
+				logEvent('RACE-KILL', `sq${captureSq} ${victim.color===WHITE?'W':'B'}${victim.type} 在碎裂中被连吃`);
+				destroy(victim);
+				victim = null;
+			}
+		}
 
 		const start = mover.mesh.position.clone();
 		const end = squareToWorld(move_.to, new THREE.Vector3());
@@ -148,6 +177,7 @@ export function createTable(scene, bursts) {
 					mover.animating = false;
 					bursts.emit(end.clone().setY(0.03), 16, { color: SNOW, spread: 0.9, rise: 0.7, size: 4, life: 0.6 });
 					move(mover, move_.to);
+					logEvent('MOVE-DONE', `sq${move_.from}->sq${move_.to}${move_.captured?' x'+move_.captured:''}${move_.promotion?' ='+move_.promotion:''} bySq=${bySquare.size} tweens=${tweens.length}`);
 					if (move_.promotion) {
 						mover.type = move_.promotion;
 						mover.mesh.geometry = geometries[move_.promotion];
@@ -205,6 +235,28 @@ export function createTable(scene, bursts) {
 		// 所有走子/碎裂动画都已落定（悔棋重建前必须满足，
 		// 否则进行中的 tween 闭包会抓住旧棋子不放，重建后回写出残子）。
 		isIdle: () => tweens.length === 0,
+		// 残影自检：把三维桌面上的棋子和棋盘逻辑状态逐格对账，
+		// 任何多出来/少掉的棋子都记进日志并当场修正（碎裂中的棋子本就暂时缺席，跳过）。
+		audit(pos) {
+			const want = new Map();
+			for (const { sq, type, color } of pieceList(pos)) want.set(sq, `${color}:${type}`);
+			const have = new Map();
+			for (const [sq, entry] of bySquare) have.set(sq, `${entry.color}:${entry.type}`);
+			let bad = 0;
+			for (const [sq, sig] of have) {
+				if (want.get(sq) !== sig) { bad++; logEvent('GHOST-EXTRA', `sq${sq} have=${sig} want=${want.get(sq) || 'empty'}`); }
+			}
+			for (const [sq, sig] of want) {
+				if (have.get(sq) !== sig) { bad++; logEvent('GHOST-MISSING', `sq${sq} want=${sig} have=${have.get(sq) || 'empty'}`); }
+			}
+			if (vanishingPieces.size) logEvent('GHOST-VANISHING', `stuck=${vanishingPieces.size} idle=${tweens.length === 0}`);
+			if (bad) {
+				logEvent('GHOST-SUMMARY', `mismatch=${bad} bySq=${bySquare.size} meshes=${meshes.length} want=${want.size} —— 自动重建桌面`);
+				// 兜底自愈：出现残子/缺子直接按逻辑状态重建，用户侧无感。
+				this.sync(pos);
+			}
+			return bad;
+		},
 		select,
 		at: sq => bySquare.get(sq),
 		squareOfMesh(mesh) {
@@ -232,11 +284,10 @@ export function createTable(scene, bursts) {
 				if (tw.t >= 1) { tweens.splice(i, 1); tw.done?.(); }
 			}
 			for (const entry of bySquare.values()) {
-				if (entry.vanishing) continue; // 碎裂动画自管网格与图标，别拽回来
 				const glow = entry.mesh.material.userData.uniforms.uLift;
 				glow.value += ((entry.selected ? 0.55 : 0) - glow.value) * Math.min(1, dt * 8);
 
-				if (entry.animating) entry.lift = 0;
+				if (entry.animating || entry.vanishing) entry.lift = 0;
 				else {
 					const want = entry.selected ? 0.30 + Math.sin(time * 2.6 + entry.bob) * 0.035 : 0;
 					entry.lift += (want - entry.lift) * Math.min(1, dt * 11);
@@ -250,7 +301,9 @@ export function createTable(scene, bursts) {
 						entry.mesh.position.z
 					);
 					// 扁平图标准直出，不做淡入——二维界面不应有呼吸感。
-					if (badgeIcons) entry.badge.material.opacity = 1;
+					// 碎裂中的棋子 opacity/缩放由碎裂 tween 全权驱动，这里绝不能回写，
+					// 否则长对局里动画链一长，被吃棋子会被每帧拽回完整图标（残影根因）。
+					if (badgeIcons) { if (!entry.vanishing) entry.badge.material.opacity = 1; }
 					else entry.badge.material.opacity += (1 - entry.badge.material.opacity) * Math.min(1, dt * 6);
 				}
 			}
