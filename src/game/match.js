@@ -1,11 +1,11 @@
 import {
-	WHITE, BLACK, QUEEN,
-	fromFen, toFen, generateMoves, makeMove, sanOf, status, findMove,
-	parseSquare, typeOf, other
+	WHITE, BLACK, QUEEN, START_FEN,
+	fromFen, toFen, generateMoves, makeMove, sanOf, status, findMove, inCheck,
+	parseSquare, other
 } from '../chess/engine.js';
+import { normalize } from '../chess/setup.js';
+import { balance } from '../chess/material.js';
 import { evaluate } from '../chess/ai.js';
-
-const MATERIAL = { 1: 1, 2: 3, 3: 3, 4: 5, 5: 9, 6: 0 };
 
 // 搜索常常二十毫秒就回了开局着法，读起来像对手压着你走。
 // 每个等级都会把手按在棋子上等一会儿：[下限, 随机区间]，单位毫秒。
@@ -30,6 +30,7 @@ export function createMatch(hooks = {}) {
 
 	const state = {
 		pos: fromFen(),
+		startFen: START_FEN,
 		history: [],
 		human: WHITE,
 		level: 'club',
@@ -68,13 +69,10 @@ export function createMatch(hooks = {}) {
 		else play();
 	};
 
+	// 净子力分：正数表示该方多子。
 	function tally() {
-		const counts = { [WHITE]: 0, [BLACK]: 0 };
-		for (const entry of state.history) {
-			if (!entry.captured) continue;
-			counts[entry.mover] += MATERIAL[typeOf(entry.captured)] || 0;
-		}
-		return { [WHITE]: counts[WHITE] - counts[BLACK], [BLACK]: counts[BLACK] - counts[WHITE] };
+		const b = balance(state.pos);
+		return { [WHITE]: b[WHITE].score, [BLACK]: b[BLACK].score };
 	}
 
 	function finish(reason, winner) {
@@ -87,12 +85,13 @@ export function createMatch(hooks = {}) {
 		const mover = state.pos.turn;
 		const san = sanOf(state.pos, move);
 		const before = toFen(state.pos);
+		const no = state.pos.full;
 		const captured = move.captured;
 		makeMove(state.pos, move);
 
 		if (state.timed !== false) state.clocks[mover] += state.increment;
 		state.lastMove = move;
-		state.history.push({ san, move, before, mover, captured, ...meta });
+		state.history.push({ san, move, before, no, mover, captured, ...meta });
 
 		const key = positionKey(state.pos);
 		const seen = (state.repeats.get(key) || 0) + 1;
@@ -128,11 +127,13 @@ export function createMatch(hooks = {}) {
 	return {
 		state,
 
-		newGame({ human = WHITE, level = 'club', minutes = 10, increment = 5 } = {}) {
+		// fen：从任意局面开局（摆棋编辑器/拍照复刻），调用方负责先用 setup.prepare() 校验。
+		newGame({ human = WHITE, level = 'club', minutes = 10, increment = 5, fen = START_FEN } = {}) {
 			requestId++;
 			clearTimeout(paceTimer);
 			paceTimer = 0;
-			state.pos = fromFen();
+			state.pos = normalize(fromFen(fen));
+			state.startFen = toFen(state.pos);
 			state.history = [];
 			state.human = human;
 			state.level = level;
@@ -146,8 +147,8 @@ export function createMatch(hooks = {}) {
 			state.repeats = new Map([[positionKey(state.pos), 1]]);
 			state.started = true;
 			hooks.onReset?.();
-			hooks.onTurn?.(WHITE, false);
-			if (human !== WHITE) think();
+			hooks.onTurn?.(state.pos.turn, inCheck(state.pos));
+			if (state.pos.turn !== human) think();
 		},
 
 		movesFrom: sq => (state.over || state.thinking || state.pos.turn !== state.human)
@@ -182,14 +183,18 @@ export function createMatch(hooks = {}) {
 			state.pos = fromFen(entry.before);
 			state.over = null;
 			state.lastMove = state.history.length ? state.history[state.history.length - 1].move : null;
+			// 重复局面计数按剩余棋谱重算，悔棋后三次重复判和依然准确。
 			state.repeats = new Map();
+			for (const key of [...state.history.map(h => positionKey(fromFen(h.before))), positionKey(state.pos)]) {
+				state.repeats.set(key, (state.repeats.get(key) || 0) + 1);
+			}
 			state.eval = evaluate(state.pos) / 100 * (state.pos.turn === WHITE ? 1 : -1);
 			requestId++;
 			clearTimeout(paceTimer);
 			paceTimer = 0;
 			state.thinking = false;
 			hooks.onReset?.();
-			hooks.onTurn?.(state.pos.turn, false);
+			hooks.onTurn?.(state.pos.turn, inCheck(state.pos));
 			return true;
 		},
 
@@ -207,11 +212,17 @@ export function createMatch(hooks = {}) {
 
 		tally,
 		pgn() {
-			const moves = state.history.map((h, i) => (i % 2 === 0 ? `${i / 2 + 1}. ` : '') + h.san).join(' ');
-			const tail = state.over
-				? state.over.winner === WHITE ? ' 1-0' : state.over.winner === BLACK ? ' 0-1' : ' 1/2-1/2'
-				: ' *';
-			return moves + tail;
+			const result = state.over
+				? state.over.winner === WHITE ? '1-0' : state.over.winner === BLACK ? '0-1' : '1/2-1/2'
+				: '*';
+			const moves = state.history.map((h, i) => {
+				if (h.mover === WHITE) return `${h.no}. ${h.san}`;
+				return i === 0 ? `${h.no}... ${h.san}` : h.san;
+			}).join(' ');
+			// 非标准开局按 PGN 规范带上起始局面，其他软件才能正确复现。
+			const header = state.startFen === START_FEN ? ''
+				: `[SetUp "1"]\n[FEN "${state.startFen}"]\n\n`;
+			return `${header}${moves ? moves + ' ' : ''}${result}`;
 		},
 		dispose() { clearTimeout(paceTimer); worker.terminate(); }
 	};
