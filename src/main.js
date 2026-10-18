@@ -11,6 +11,7 @@ import { loadSettings, saveSettings, saveGame, loadGame } from './ui/settings.js
 import { createAudio } from './core/audio.js';
 import { createEditor } from './editor/editor.js';
 import { createPhoto } from './editor/photo.js';
+import * as vision from './vision/index.js';
 
 const SIDE = { [WHITE]: '白方', [BLACK]: '黑方' };
 const LEVEL_TEXT = { novice: '新手', club: '棋社', expert: '专家', master: '大师' };
@@ -407,7 +408,7 @@ const editor = createEditor({
 });
 
 const photo = createPhoto({
-	recognizer: null,
+	recognizer: vision,
 	toast: text => shell.toast(text),
 	// 识别结果交给摆棋编辑器核对。
 	onResult: result => editor.open(null, result)

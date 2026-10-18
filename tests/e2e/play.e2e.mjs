@@ -132,6 +132,55 @@ await scenario('对局进行中从摆棋/识别结果开局：一定是全新一
 	assert.deepEqual([saved.fen, saved.moves.length], ['6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1', 0]);
 });
 
+await scenario('拍照复刻：截图导入 → 自动定位 → 识别 → 核对 → 开全新一局', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	const fen = 'r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP3PPP/R2QKB1R w KQ - 0 8';
+	await page.evaluate(f => {
+		localStorage.setItem('frostfall.v2', JSON.stringify({ board: 'brown', pieces: 'chessnut' }));
+		localStorage.setItem('frostfall.game', JSON.stringify({ fen: f, moves: [], human: 16, level: 'novice', flipped: true }));
+	}, fen);
+	await page.reload();
+	await page.waitForTimeout(300);
+	const shot = await page.screenshot();      // 黑方视角的整页截图
+	await page.click('.topbar [data-act="photo"]');
+	await page.locator('#photo input[type=file]').nth(1).setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: shot });
+	await page.waitForFunction(() => /找到棋盘/.test(document.querySelector('[data-slot=photo-status]').textContent), null, { timeout: 15000 });
+	assert.equal(await page.locator('[data-slot=photo-quad] .handle').count(), 4);
+	await page.click('#photo [data-ph="read"]');
+	await page.waitForSelector('#editor:not([hidden])');
+	assert.equal((await page.inputValue('#ed-fen')).split(' ')[0], fen.split(' ')[0], '识别出的摆法应与截图一致');
+	assert.equal(await page.textContent('#board-edit .cf'), 'h', '黑方视角的截图应自动翻转显示');
+	await page.click('#editor [data-ed="play"]');
+	await page.waitForTimeout(300);
+	assert.equal((await moves(page)).length, 0);
+	assert.equal(await page.locator('#board2d .pc').count(), 30);
+});
+
+await scenario('拍照复刻：没有棋盘的图给出提示，四角可手动拖动', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="photo"]');
+	// 一张纯色渐变图：不含棋盘
+	const blank = await page.evaluate(async () => {
+		const c = new OffscreenCanvas(640, 480), g = c.getContext('2d');
+		const grad = g.createLinearGradient(0, 0, 640, 480); grad.addColorStop(0, '#89a'); grad.addColorStop(1, '#ddd');
+		g.fillStyle = grad; g.fillRect(0, 0, 640, 480);
+		const buf = new Uint8Array(await (await c.convertToBlob()).arrayBuffer());
+		return Array.from(buf);
+	});
+	await page.locator('#photo input[type=file]').nth(1).setInputFiles({ name: 'blank.png', mimeType: 'image/png', buffer: Buffer.from(blank) });
+	await page.waitForFunction(() => /没找到棋盘/.test(document.querySelector('[data-slot=photo-status]').textContent), null, { timeout: 15000 });
+	const handle = page.locator('[data-slot=photo-quad] .handle').first();
+	const before = await handle.getAttribute('cx');
+	const box = await handle.boundingBox();
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(box.x + 60, box.y + 40, { steps: 5 });
+	await page.mouse.up();
+	assert.notEqual(await page.locator('[data-slot=photo-quad] .handle').first().getAttribute('cx'), before, '拖动后左上角应移动');
+	await page.click('#photo [data-ph="close"]');
+	assert.ok(await page.isHidden('#photo'));
+});
+
 await scenario('设置：棋盘主题与棋子套装', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
 	await page.click('#dlg-new [data-act="start"]');

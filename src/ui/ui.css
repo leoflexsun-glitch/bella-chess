@@ -276,9 +276,11 @@ body[data-view="3d"] .only3d { display: block; padding-top: 14px; }
 .photo-stage { position: relative; flex: 0 1 auto; max-width: calc(100vw - 420px); touch-action: none; user-select: none; -webkit-user-select: none; }
 .photo-stage canvas { display: block; max-width: 100%; max-height: calc(100dvh - var(--topbar) - 48px); border-radius: 10px; box-shadow: var(--shadow); }
 .quad { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; stroke: none; }
-.quad .edge { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: var(--accent); stroke-width: 2.5; }
-.quad .grid { stroke: rgba(255, 255, 255, .9); stroke-width: 1; fill: none; filter: drop-shadow(0 0 1px rgba(0, 0, 0, .9)); }
-.quad .handle { fill: #fff; stroke: var(--accent); stroke-width: 3; cursor: grab; }
+/* 对齐参考线用醒目的蓝色：与任何棋盘配色都拉得开，白色底衬保证暗处也看得清。线宽由脚本按图片尺寸设定。 */
+.quad .edge { fill: rgba(47, 128, 255, .1); stroke: #2f80ff; }
+.quad .grid-under { stroke: rgba(255, 255, 255, .75); fill: none; }
+.quad .grid { stroke: #2f80ff; fill: none; }
+.quad .handle { fill: #fff; stroke: #2f80ff; cursor: grab; }
 .photo-side { width: 340px; flex: none; }
 .photo-side .status { margin-bottom: 6px; }
 .photo-side .muted { font-size: 13.5px; margin-bottom: 14px; }
@@ -342,7 +344,9 @@ body[data-view="3d"] .moves li:nth-child(odd) { background: rgba(255, 255, 255, 
 	.editor-board { --board: min(calc(100vw - 16px), 560px); }
 	.editor-side, .photo-side { width: min(100%, 560px); }
 	.photo-stage { max-width: 100%; }
-	.photo-stage canvas { max-height: 62dvh; }
+	.photo-stage canvas { max-height: 50dvh; }
+	/* 主按钮吸底：图片再高也不用滚动去找"识别"。 */
+	.photo-side .btn.primary { position: sticky; bottom: calc(10px + env(safe-area-inset-bottom)); box-shadow: 0 6px 18px rgba(0, 0, 0, .18); }
 }
 @media (max-width: 520px) {
 	.tbtn span { display: none; }

@@ -78,7 +78,8 @@ export function createPhoto({ recognizer, onResult, toast }) {
 			try { found = recognizer.locateBoard(image); } catch { found = null; }
 			if (found) {
 				corners = found.corners.map(([x, y]) => [x, y]);
-				statusEl.textContent = '找到棋盘了，核对一下网格';
+				// 定位得分低（多见于翻拍照片）就明确请用户核对四角。
+				statusEl.textContent = found.score >= 0.5 ? '找到棋盘了，核对一下网格' : '大致找到了棋盘，请拖动四角对准';
 			} else {
 				const s = Math.min(image.width, image.height) * 0.8;
 				const x = (image.width - s) / 2, y = (image.height - s) / 2;
@@ -104,8 +105,9 @@ export function createPhoto({ recognizer, onResult, toast }) {
 		}
 		const r = Math.max(9, Math.min(image.width, image.height) * 0.022);
 		quadSvg.innerHTML =
-			`<polygon class="edge" points="${q.map(p => p.join(',')).join(' ')}"/>` +
-			`<path class="grid" d="${grid}" style="stroke-width:${r / 7}"/>` +
+			`<polygon class="edge" points="${q.map(p => p.join(',')).join(' ')}" style="stroke-width:${r / 3}"/>` +
+			`<path class="grid-under" d="${grid}" style="stroke-width:${r / 3}"/>` +
+			`<path class="grid" d="${grid}" style="stroke-width:${r / 6}"/>` +
 			q.map((p, i) => `<circle class="handle" data-corner="${i}" cx="${p[0]}" cy="${p[1]}" r="${r}" style="stroke-width:${r / 3}"/>`).join('');
 	}
 
