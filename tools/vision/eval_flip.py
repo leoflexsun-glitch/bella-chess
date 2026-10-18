@@ -16,10 +16,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 def main():
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 2000
+    mode = sys.argv[2] if len(sys.argv) > 2 else 'uniform'
     rng = np.random.default_rng(77)
     pos = []
     for _ in range(n):
-        sq = vlib.realistic_position(rng, max_plies=int(rng.choice([20, 60, 120])))
+        # 默认与截图评测相同：随机对局 0–140 步（越长越接近"随机摆放"，方向越难判断）
+        sq = vlib.realistic_position(rng) if mode == 'uniform' else vlib.realistic_position(rng, max_plies=int(rng.choice([20, 60, 120])))
         pos.append(sq)
     path = os.path.join(HERE, '.cache', 'flip_positions.json')
     with open(path, 'w') as f:

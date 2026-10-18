@@ -18,7 +18,7 @@ if (wi >= 0) {
 }
 
 const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
-let located = 0, nullCount = 0, exact = 0, sqOk = 0, sqTot = 0, flipOk = 0, readExact = 0;
+let located = 0, nullCount = 0, exact = 0, sqExact = 0, sqOk = 0, sqTot = 0, flipOk = 0, readExact = 0;
 let tLoc = 0, tRead = 0;
 const errs = [];
 for (const m of meta) {
@@ -49,6 +49,7 @@ for (const m of meta) {
 		const r = loc ? vision.recognize(img) : null;
 		const good = r && r.placement === m.placement;
 		if (good) exact++;
+		if (r && r.squares.every((v, i) => v === m.squares[i])) sqExact++;
 		line += ` read=${k}/64 flip=${fl === m.flipped ? 'ok' : 'WRONG'} e2e=${good ? 'ok' : 'FAIL'}`;
 		if (verbose && k < 64) {
 			const diff = [];
@@ -65,5 +66,5 @@ console.log(`locate: ${(100 * located / n).toFixed(1)}% within 2% (null ${nullCo
 if (!locateOnly) {
 	console.log(`read (GT corners): per-square ${(100 * sqOk / sqTot).toFixed(2)}%, board exact ${(100 * readExact / n).toFixed(1)}%, avg ${(tRead / n).toFixed(0)} ms`);
 	console.log(`flip guess: ${(100 * flipOk / n).toFixed(1)}%`);
-	console.log(`end-to-end recognize() exact placement: ${(100 * exact / n).toFixed(1)}%`);
+	console.log(`end-to-end recognize(): all 64 squares right (display order) ${(100 * sqExact / n).toFixed(1)}%, exact FEN placement incl. orientation ${(100 * exact / n).toFixed(1)}%`);
 }

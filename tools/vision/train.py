@@ -65,9 +65,8 @@ def augment(x, g):
     B = x.shape[0]
     flip = torch.rand(B, generator=g) < 0.5
     x = torch.where(flip[:, None, None], x.flip(-1), x)
-    if True:
-        sh = torch.randint(-1, 2, (2,), generator=g)
-        x = torch.roll(x, shifts=(int(sh[0]), int(sh[1])), dims=(1, 2))
+    sh = torch.randint(-1, 2, (2,), generator=g)  # 整批同一平移，开销可忽略
+    x = torch.roll(x, shifts=(int(sh[0]), int(sh[1])), dims=(1, 2))
     a = 1 + (torch.rand(B, 1, 1, generator=g) - 0.5) * 0.3
     b = (torch.rand(B, 1, 1, generator=g) - 0.5) * 0.3
     x = x * a + b

@@ -5,7 +5,6 @@ import argparse
 import base64
 import datetime
 import os
-import struct
 import sys
 
 import numpy as np

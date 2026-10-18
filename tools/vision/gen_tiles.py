@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vlib  # noqa: E402
 
 T = 32
+SHAPE_AUG = float(os.environ.get('SHAPE_AUG', '0.5'))  # 棋子造型增强的概率（模拟未见过的套装）
 UI_BG = [(255, 255, 255), (246, 246, 246), (38, 36, 33), (49, 46, 43), (22, 21, 18), (240, 240, 240),
          (200, 200, 200), (70, 70, 70), (230, 225, 215)]
 
@@ -79,7 +80,7 @@ def make_board(rng, sets, weights, positions, aug, app_theme=None):
         light, dark = vlib.APP_THEMES[app_theme]
     else:
         light, dark = vlib.pick_colors(rng)
-    opts = {'flipped': flipped}
+    opts = {'flipped': flipped, 'shape_aug': SHAPE_AUG if aug == 'full' else 0.0}
     if clean:
         opts.update(highlight=False, texture='flat', check=False, dots=False, labels=False, arrows=False,
                     piece_scale=1.0, shadow=False, piece_jitter=False)

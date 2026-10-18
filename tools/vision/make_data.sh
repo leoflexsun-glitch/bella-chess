@@ -14,9 +14,9 @@ $G --out "$D/app_decor_tr.npz"  --boards 900   --sets app     --positions mix   
 # 最终模型额外加入留出套装
 $G --out "$D/holdout_tr.npz"    --boards 1500  --sets holdout --positions mix       --aug full  --seed 4
 
-# 评测集（全部用真实对局局面）
-$G --out "$D/ev_holdout_full.npz"  --boards 300 --sets holdout --positions realistic --aug full  --seed 101
-$G --out "$D/ev_holdout_clean.npz" --boards 300 --sets holdout --positions realistic --aug clean --seed 102
-$G --out "$D/ev_indist_full.npz"   --boards 300 --sets train   --positions realistic --aug full  --seed 103
-$G --out "$D/ev_app_clean.npz"     --boards 450 --sets app     --positions realistic --aug clean --app-themes --seed 104
-$G --out "$D/ev_app_decor.npz"     --boards 300 --sets app     --positions realistic --aug decor --seed 105
+# 评测集（全部用真实对局局面；不做棋子造型增强，保持真实套装原样）
+SHAPE_AUG=0 $G --out "$D/ev_holdout_full.npz"  --boards 300 --sets holdout --positions realistic --aug full  --seed 101
+SHAPE_AUG=0 $G --out "$D/ev_holdout_clean.npz" --boards 300 --sets holdout --positions realistic --aug clean --seed 102
+SHAPE_AUG=0 $G --out "$D/ev_indist_full.npz"   --boards 300 --sets train   --positions realistic --aug full  --seed 103
+SHAPE_AUG=0 $G --out "$D/ev_app_clean.npz"     --boards 450 --sets app     --positions realistic --aug clean --app-themes --seed 104
+SHAPE_AUG=0 $G --out "$D/ev_app_decor.npz"     --boards 300 --sets app     --positions realistic --aug decor --seed 105

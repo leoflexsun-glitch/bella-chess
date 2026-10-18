@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { loadNet, runNet } from '../../src/vision/net.js';
+import { loadNet, classifyTiles, flatMask } from '../../src/vision/net.js';
 import { applyPriors, CLASSES } from '../../src/vision/chess.js';
 
 const args = process.argv.slice(2);
@@ -29,7 +29,7 @@ for (const base of args) {
 		const off = b * 64 * S * S;
 		for (let i = 0; i < 64 * S * S; i++) x[i] = (tiles[off + i] - mean) / (std + EPS);
 		const t = performance.now();
-		const probs = runNet(net, x, 64);
+		const probs = classifyTiles(net, x, 64, flatMask(tiles.subarray(off, off + 64 * S * S), S, 64));
 		const { squares } = applyPriors(probs);
 		ms += performance.now() - t;
 		let k = 0, kr = 0;

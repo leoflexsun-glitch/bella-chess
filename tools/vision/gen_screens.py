@@ -86,6 +86,7 @@ def make_screen(rng, sets, mini_board=True, crop=True):
     maxB = int(min(1600, 0.92 * min(W, H)))
     B = int(round(math.exp(rng.uniform(math.log(160), math.log(max(161, maxB))))))
     frame = int(rng.uniform(0.01, 0.05) * B) if rng.random() < 0.4 else 0
+    B = min(B, min(W, H) - 2 * frame - 6)  # 带框的大棋盘也要放得下
     bx0 = int(rng.uniform(frame + 2, W - B - frame - 2))
     by0 = int(rng.uniform(frame + 2, H - B - frame - 2))
     theme = THEMES[int(rng.integers(len(THEMES)))]

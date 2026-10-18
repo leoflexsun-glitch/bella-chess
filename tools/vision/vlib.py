@@ -138,22 +138,23 @@ def load_set(name):
     return imgs
 
 
-def sprite_at(name, c, px):
-    # 预乘后的 px×px float32 RGBA（0..1）
-    key = (name, c, px)
+def sprite_at(name, c, px, py=None):
+    # 预乘后的 py×px float32 RGBA（0..1）
+    py = px if py is None else py
+    key = (name, c, px, py)
     if key in _sprite_cache:
         return _sprite_cache[key]
     pk = (name, c, 'pm')
     if pk not in _sprite_cache:
         _sprite_cache[pk] = _premul(load_set(name)[c])
     pm = _sprite_cache[pk]
-    chans = [Image.fromarray(pm[..., i]).resize((px, px), Image.LANCZOS if px < 128 else Image.BICUBIC)
+    chans = [Image.fromarray(pm[..., i]).resize((px, py), Image.LANCZOS if max(px, py) < 128 else Image.BICUBIC)
              for i in range(4)]
     arr = np.clip(np.stack([np.asarray(ch) for ch in chans], -1), 0, 1).astype(np.float32)
     # LANCZOS 过冲会让预乘 RGB 超过 alpha，合成时溢出
     arr[..., :3] = np.minimum(arr[..., :3], arr[..., 3:4])
     if len(_sprite_cache) > 6000:  # 只清缩放结果，保留原始素材
-        for kk in [kk for kk in _sprite_cache if isinstance(kk, tuple) and isinstance(kk[2], int)]:
+        for kk in [kk for kk in _sprite_cache if isinstance(kk, tuple) and len(kk) == 4]:
             del _sprite_cache[kk]
     _sprite_cache[key] = arr
     return arr
@@ -390,23 +391,73 @@ def render_board(rng, squares, s, set_name, light=None, dark=None, opts=None):
 
     # 棋子
     scale = o.get('piece_scale', float(np.clip(rng.normal(0.97, 0.06), 0.78, 1.06)))
-    px = max(4, int(round(s * scale)))
+    # 造型增强（整盘统一，模拟没见过的棋子套装）：长宽比、整体偏上/偏下、笔画粗细、填充/描边色调
+    shape_aug = o.get('shape_aug', 0.0) > 0 and rng.random() < o.get('shape_aug', 0.0)
+    sx = sy = 1.0
+    dy_off, morph, tone = 0.0, 0, None
+    if shape_aug:
+        if rng.random() < 0.6:
+            scale = float(rng.uniform(0.62, 1.05))
+            sx = float(rng.uniform(0.8, 1.12))
+            sy = float(rng.uniform(0.88, 1.12))
+            dy_off = float(rng.uniform(-0.12, 0.1))
+        if rng.random() < 0.35:
+            morph = int(rng.choice([-1, 1]))
+        if rng.random() < 0.6:
+            tone = (_rand_tone(rng, True), _rand_tone(rng, False))
+    pw, ph = max(4, int(round(s * scale * sx))), max(4, int(round(s * scale * sy)))
     shadow = o.get('shadow', rng.random() < 0.08)
     for i, v in enumerate(squares):
         if not v:
             continue
-        sp = sprite_at(set_name, v, px)
+        sp = sprite_at(set_name, v, pw, ph)
+        if morph or tone:
+            sp = _restyle(sp, morph, tone[0 if v.isupper() else 1] if tone else None)
         r0, c0 = divmod(i, 8)
         jx = int(round(rng.normal(0, 0.015) * s)) if o.get('piece_jitter', True) else 0
         jy = int(round(rng.normal(0, 0.015) * s)) if o.get('piece_jitter', True) else 0
-        x = c0 * s + (s - px) // 2 + jx
-        y = r0 * s + (s - px) // 2 + jy
+        x = c0 * s + (s - pw) // 2 + jx
+        y = r0 * s + (s - ph) // 2 + jy + int(round(dy_off * s))
         _blit(img, sp, x, y, shadow)
 
     if o.get('arrows', rng.random() < 0.06):
         lay = draw_arrows(rng, n, s)
         img = img * (1 - lay[..., 3:4]) + lay[..., :3] * 255 * lay[..., 3:4]
     return np.clip(img, 0, 255)
+
+
+def _rand_tone(rng, white):
+    # 亮度重映射 [0,1] → [lo,hi] 加轻微色偏；白子保持亮、黑子保持暗，只改"有多白/多黑"和描边深浅
+    if white:
+        lo, hi = rng.uniform(0, 0.45), rng.uniform(0.78, 1.0)
+    else:
+        lo, hi = rng.uniform(0, 0.2), rng.uniform(0.35, 1.0)
+    tint = 1 + rng.uniform(-0.12, 0.12, 3)
+    return lo, hi, tint.astype(np.float32)
+
+
+def _restyle(sp, morph, tone):
+    a = sp[..., 3:4]
+    rgb = np.where(a > 1e-4, sp[..., :3] / np.maximum(a, 1e-4), 0)
+    if tone is not None:
+        lo, hi, tint = tone
+        rgb = np.clip((lo + (hi - lo) * rgb) * tint, 0, 1)
+    if morph:
+        # 3×3 膨胀/腐蚀：笔画变粗/变细（同时作用于颜色，边缘颜色随之扩展）
+        pad_a = np.pad(a[..., 0], 1, mode='constant')
+        pad_c = np.pad(rgb, ((1, 1), (1, 1), (0, 0)), mode='edge')
+        stack_a = np.stack([pad_a[dy:dy + a.shape[0], dx:dx + a.shape[1]] for dy in range(3) for dx in range(3)])
+        if morph > 0:
+            k = stack_a.argmax(0)
+            na = stack_a.max(0)
+        else:
+            k = stack_a.argmin(0)
+            na = stack_a.min(0)
+        stack_c = np.stack([pad_c[dy:dy + a.shape[0], dx:dx + a.shape[1]] for dy in range(3) for dx in range(3)])
+        rgb = np.take_along_axis(stack_c, k[None, ..., None], 0)[0]
+        a = na[..., None]
+    out = np.concatenate([rgb * a, a], -1).astype(np.float32)
+    return out
 
 
 def _blit(img, sp, x, y, shadow=False):
