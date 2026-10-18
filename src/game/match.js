@@ -48,8 +48,17 @@ export function createMatch(hooks = {}) {
 
 	let askedAt = 0;
 	let paceTimer = 0;
+	let hint = null;   // { id, fen, done }：进行中的"提示一步"请求
 
 	worker.onmessage = ({ data }) => {
+		if (hint && data.id === hint.id) {
+			const { fen, done } = hint;
+			hint = null;
+			// 局面已经变了（走子/悔棋），提示作废。
+			if (fen !== toFen(state.pos) || !data.from) { done(null); return; }
+			done(findMove(state.pos, parseSquare(data.from), parseSquare(data.to), data.promotion || QUEEN));
+			return;
+		}
 		if (data.id !== requestId) return;
 		if (data.type !== 'result') return;
 		if (state.over || !data.from) { state.thinking = false; return; }
@@ -125,7 +134,8 @@ export function createMatch(hooks = {}) {
 		const seen = (state.repeats.get(key) || 0) + 1;
 		state.repeats.set(key, seen);
 
-		state.eval = evaluate(state.pos) / 100 * (state.pos.turn === WHITE ? 1 : -1);
+		// 局势：电脑每步都带回搜索分（在 worker 回调里已写入，比静态评估可靠得多）；
+		// 人走子后沿用上一次判断，直到电脑应答。
 		const over = verdict(mover, seen);
 		if (over) state.over = over;
 		if (silent) return;
@@ -171,7 +181,16 @@ export function createMatch(hooks = {}) {
 				if (!move) break;
 				commit(move, {}, true);
 			}
+			state.eval = evaluate(state.pos) / 100 * (state.pos.turn === WHITE ? 1 : -1);
 			announce();
+		},
+
+		// 替人类算一步好棋；done(move | null)。负数 id 与对手搜索的序号互不冲突。
+		suggest(done) {
+			if (state.over || state.thinking || state.pos.turn !== state.human || hint) return false;
+			hint = { id: -(++requestId), fen: toFen(state.pos), done };
+			worker.postMessage({ type: 'search', id: hint.id, fen: hint.fen, level: 'hint' });
+			return true;
 		},
 
 		movesFrom: sq => (state.over || state.thinking || state.pos.turn !== state.human)

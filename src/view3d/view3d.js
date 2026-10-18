@@ -138,11 +138,13 @@ export function createView3d({ canvas, settings, intents, askPromotion, onQualit
 			setTimeout(audit, 60);
 		},
 
-		setMarks({ lastMove, selected = -1, targets = [], check = -1 } = {}) {
+		setMarks({ lastMove, selected = -1, targets = [], check = -1, arrow = null } = {}) {
 			if (!w) return;
 			const b = w.board;
 			b.clearMarks();
 			if (lastMove) { b.setMark(lastMove.from, 3, 0.7); b.setMark(lastMove.to, 3, 1); }
+			// 3D 没有箭头层：提示着法用"选中格 + 落点"两种标记表示。
+			if (arrow) { b.setMark(arrow.from, 0, 1); b.setMark(arrow.to, 1, 1); }
 			if (selected >= 0) b.setMark(selected, 0, 1);
 			for (const t of targets) b.setMark(t.sq, t.capture ? 2 : 1, 1);
 			if (check >= 0) b.setMark(check, 2, 1);
@@ -152,7 +154,6 @@ export function createView3d({ canvas, settings, intents, askPromotion, onQualit
 		setFlipped(on) {
 			if (!w) return;
 			if (w.stage.state.flipped !== on) w.stage.flip();
-			w.board.setFlipped(on);
 		},
 
 		askPromotion: (to, color) => askPromotion(color),

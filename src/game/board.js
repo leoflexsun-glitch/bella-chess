@@ -88,8 +88,7 @@ export function createBoard(scene) {
 		uTime: { value: 0 },
 		uMarks: { value: marks },
 		uHover: { value: -1 },
-		uHints: { value: 1 },
-		uFlat: { value: 0 }
+		uHints: { value: 1 }
 	};
 
 	const surface = new THREE.MeshPhysicalMaterial({
@@ -115,7 +114,6 @@ export function createBoard(scene) {
 				uniform float uTime;
 				uniform float uHover;
 				uniform float uHints;
-				uniform float uFlat;
 				uniform sampler2D uMarks;
 				varying vec3 vWorld;
 				${NOISE}`)
@@ -137,10 +135,7 @@ export function createBoard(scene) {
 				// 格子之间的发丝凹槽。
 				vec2 edge = min(f, 1.0 - f);
 				float seam = 1.0 - smoothstep(0.0, 0.022, min(edge.x, edge.y));
-				diffuseColor.rgb *= 1.0 - seam * 0.45 * (1.0 - uFlat);
-
-				// 扁平模式：纯白/浅灰平底，无纹理无凹槽。
-				diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.941, 0.925, 0.847), vec3(0.475, 0.588, 0.541), dark), uFlat);`)
+				diffuseColor.rgb *= 1.0 - seam * 0.45;`)
 			.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
 				{
 					vec2 lp = vWorld.xz + 4.0;
@@ -177,13 +172,7 @@ export function createBoard(scene) {
 						glow += hoverRing * 0.16 * vec3(0.86, 0.93, 1.0);
 					}
 
-					// 扁平模式跳过着色器辉光（提示由实体网格画），
-					// 且棋盘不被场景光照染色，保持干净的平底色。
-					if (uFlat > 0.5) {
-						outgoingLight = diffuseColor.rgb;
-					} else {
-						outgoingLight += glow;
-					}
+					outgoingLight += glow;
 				}
 				#include <opaque_fragment>`);
 	};
@@ -234,54 +223,6 @@ export function createBoard(scene) {
 
 	scene.add(group);
 
-	// ── 扁平模式的坐标牌 ────────────────────────────────────
-	// 坐标原本烘在边框上，扁平模式没有边框，棋盘四周就没有 a–h / 1–8
-	// 可看了。这里画一块带坐标的透明底板垫在棋盘下，仅扁平模式显示。
-	// 坐标画在格子内角：纵坐标 1–8 在 a 列每格左上角，横坐标 a–h 在第 1 横排
-	// 每格右下角（Lichess 风格）——不额外占边框，棋盘可以占满整个视野。
-	// 这套棋盘的深格其实也只是灰绿浅色，所以坐标在两类格子上都用深灰绿，哪都看得清。
-	const SQ = 256, ON_LIGHT = '#42564b', ON_DARK = '#24332c'; // 这套扁平棋盘的两色都偏浅，坐标统一用深灰绿才压得住
-	function drawCoords(files, ranks) {
-		const cv = document.createElement('canvas');
-		cv.width = cv.height = SQ * 8;
-		const c = cv.getContext('2d');
-		c.font = `700 70px "Geist", system-ui, sans-serif`;
-		for (let i = 0; i < 8; i++) {
-			// 纵坐标：a 列（列 0），每行左上角；格色 = (行+列) 偶为浅。
-			c.textAlign = 'left';
-			c.textBaseline = 'top';
-			c.fillStyle = i % 2 === 0 ? ON_LIGHT : ON_DARK; // 顶行 (8 行) 是浅格
-			c.fillText(String(ranks[i]), 14, i * SQ + 10);
-			// 横坐标：第 1 横排（行 7），每列右下角。
-			c.textAlign = 'right';
-			c.textBaseline = 'alphabetic';
-			c.fillStyle = (7 + i) % 2 === 0 ? ON_LIGHT : ON_DARK;
-			c.fillText(files[i], (i + 1) * SQ - 14, 8 * SQ - 16);
-		}
-		return cv;
-	}
-	// 翻转视角 = 世界→屏幕转了 180°：把"黑方视角"的坐标画好再整个转 180°，
-	// 上屏后字才是正的。
-	function rotate180(src) {
-		const cv = document.createElement('canvas');
-		cv.width = cv.height = src.width;
-		const c = cv.getContext('2d');
-		c.translate(src.width / 2, src.height / 2);
-		c.rotate(Math.PI);
-		c.drawImage(src, -src.width / 2, -src.height / 2);
-		return cv;
-	}
-	const coordTex = new THREE.CanvasTexture(drawCoords('abcdefgh', [8, 7, 6, 5, 4, 3, 2, 1]));
-	const coordTexFlip = new THREE.CanvasTexture(rotate180(drawCoords('hgfedcba', [1, 2, 3, 4, 5, 6, 7, 8])));
-	for (const t of [coordTex, coordTexFlip]) { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; }
-	const coords = new THREE.Mesh(
-		new THREE.PlaneGeometry(8, 8).rotateX(-Math.PI / 2),
-		new THREE.MeshBasicMaterial({ map: coordTex, transparent: true, depthWrite: false })
-	);
-	coords.position.y = 0.016; // 略压过棋盘面，但低于提示网格（0.02）
-	coords.visible = false;
-	group.add(coords);
-
 	// ── 实体网格提示（fallback）─────────────────────────────
 	// 棋盘高亮走片元着色器 + DataTexture，在 mediump 精度的手机 GPU
 	// 上 UV/格内坐标会漂移，导致落点圆点和吃子环整个消失。
@@ -294,7 +235,6 @@ export function createBoard(scene) {
 	const geoRing = new THREE.RingGeometry(0.34, 0.45, 32).rotateX(-Math.PI / 2);
 	const geoSquare = new THREE.PlaneGeometry(0.96, 0.96).rotateX(-Math.PI / 2);
 
-	// 颜色兼顾深色 3D 棋盘和浅色扁平棋盘。
 	const matDot = new THREE.MeshBasicMaterial({ color: 0x4a9de8, transparent: true, opacity: 0.85, depthWrite: false });
 	const matRing = new THREE.MeshBasicMaterial({ color: 0xef7758, transparent: true, opacity: 0.92, depthWrite: false });
 	const matSel = new THREE.MeshBasicMaterial({ color: 0x74b8ec, transparent: true, opacity: 0.42, depthWrite: false });
@@ -323,19 +263,16 @@ export function createBoard(scene) {
 	}
 
 	let touchOverlay = false;  // 触屏设备自动开（手机 GPU 精度不够，着色器提示会丢）
-	let flatOverlay = false;   // 扁平 2D 模式必开（提示就是风格的一部分）
 	let hintsOn = true;
-
-	const overlayOn = () => touchOverlay || flatOverlay;
 
 	function syncOverlay() {
 		for (let i = 0; i < 64; i++) {
 			const cell = overlayCells[i];
 			const base = i * 4;
-			cell.sel.visible = overlayOn() && data[base + 0] > 40;
-			cell.dot.visible = overlayOn() && hintsOn && data[base + 1] > 40;
-			cell.ring.visible = overlayOn() && hintsOn && data[base + 2] > 40;
-			cell.last.visible = overlayOn() && data[base + 3] > 40;
+			cell.sel.visible = touchOverlay && data[base + 0] > 40;
+			cell.dot.visible = touchOverlay && hintsOn && data[base + 1] > 40;
+			cell.ring.visible = touchOverlay && hintsOn && data[base + 2] > 40;
+			cell.last.visible = touchOverlay && data[base + 3] > 40;
 		}
 	}
 
@@ -359,18 +296,7 @@ export function createBoard(scene) {
 		setHints(on) { hintsOn = on; uniforms.uHints.value = on ? 1 : 0; syncOverlay(); },
 		// 强制启用实体网格提示（触屏/移动端自动开）。
 		setOverlay(on) { touchOverlay = on; syncOverlay(); },
-		// 扁平模式：平底格子、隐藏描字边框，提示全部交给实体网格。
-		setFlat(on) {
-			uniforms.uFlat.value = on ? 1 : 0;
-			frame.visible = !on;
-			slab.visible = !on;
-			coords.visible = on;
-			flatOverlay = on;
-			syncOverlay();
-		},
-		// 翻转时换用"黑方视角"的坐标纹理，底边读 h–a、左边读 1–8。
-		setFlipped(fl) { coords.material.map = fl ? coordTexFlip : coordTex; },
-		get overlay() { return overlayOn(); },
+		get overlay() { return touchOverlay; },
 		update(_dt, time) { uniforms.uTime.value = time; }
 	};
 }

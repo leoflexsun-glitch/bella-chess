@@ -47,11 +47,14 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 			el.classList.toggle('check', check);
 		},
 
+		// pawns：白方视角的兵值分；超过 900 是搜索给出的将杀分。
 		setEval(pawns) {
+			const mate = Math.abs(pawns) > 900;
 			const clamped = Math.max(-8, Math.min(8, pawns));
 			$('eval-fill').style.width = `${50 + (clamped / 8) * 46}%`;
-			$('eval-text').textContent = Math.abs(clamped) < 0.35 ? '均势'
-				: `${clamped > 0 ? '白' : '黑'} +${Math.abs(pawns).toFixed(1)}`;
+			$('eval-text').textContent = mate ? `${pawns > 0 ? '白' : '黑'}方将杀在望`
+				: Math.abs(clamped) < 0.35 ? '均势'
+					: `${clamped > 0 ? '白' : '黑'} +${Math.abs(pawns).toFixed(1)}`;
 		},
 
 		// history：对局记录；current：高亮的半步序号（-1 表示起始局面）。

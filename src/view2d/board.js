@@ -21,13 +21,15 @@ export function createBoard2d(host, intents = {}) {
 	root.className = 'b2d';
 	root.setAttribute('role', 'img');
 	root.setAttribute('aria-label', '棋盘');
-	root.innerHTML = '<div class="b2d-marks"></div><div class="b2d-coords"></div><div class="b2d-pieces"></div><div class="b2d-promo" hidden></div>';
+	root.innerHTML = '<div class="b2d-marks"></div><div class="b2d-coords"></div><div class="b2d-pieces"></div>' +
+		'<svg class="b2d-arrows" viewBox="0 0 8 8" aria-hidden="true"></svg><div class="b2d-promo" hidden></div>';
 	host.append(root);
 
 	const marksLayer = root.querySelector('.b2d-marks');
 	const coordsLayer = root.querySelector('.b2d-coords');
 	const piecesLayer = root.querySelector('.b2d-pieces');
 	const promoLayer = root.querySelector('.b2d-promo');
+	const arrowLayer = root.querySelector('.b2d-arrows');
 
 	let flipped = false;
 	let pieces = new Map();       // sq -> 元素
@@ -101,6 +103,22 @@ export function createBoard2d(host, intents = {}) {
 		for (const t of marks.targets || []) add(t.sq, t.capture ? 'cap' : 'dot');
 		add(hoverSq, 'hover');
 		marksLayer.innerHTML = out.join('');
+		renderArrow(marks.arrow);
+	}
+
+	// 提示箭头：格心到格心，箭头尖停在目标格中心稍前。
+	function renderArrow(arrow) {
+		if (!arrow) { arrowLayer.innerHTML = ''; return; }
+		const [x1, y1] = xy(arrow.from).map(v => v + 0.5);
+		const [x2, y2] = xy(arrow.to).map(v => v + 0.5);
+		const len = Math.hypot(x2 - x1, y2 - y1);
+		const ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+		const head = 0.42, tipX = x2 - ux * 0.08, tipY = y2 - uy * 0.08;
+		const baseX = tipX - ux * head, baseY = tipY - uy * head;
+		const nx = -uy * 0.26, ny = ux * 0.26;
+		arrowLayer.innerHTML =
+			`<line x1="${x1}" y1="${y1}" x2="${baseX}" y2="${baseY}"/>` +
+			`<polygon points="${tipX},${tipY} ${baseX + nx},${baseY + ny} ${baseX - nx},${baseY - ny}"/>`;
 	}
 
 	function settle(after) {

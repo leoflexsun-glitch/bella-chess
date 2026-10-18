@@ -8,7 +8,8 @@
     "dev": "npx --yes serve . -l 5173",
     "build": "node scripts/build.mjs",
     "test": "node --test \"tests/**/*.test.mjs\"",
-    "pieces": "node scripts/gen-pieces.mjs"
+    "pieces": "node scripts/gen-pieces.mjs",
+    "e2e": "node tests/e2e/play.e2e.mjs"
   },
   "devDependencies": {
     "esbuild": "0.25.12",

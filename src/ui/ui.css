@@ -99,7 +99,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 /* ── 对局主区：棋盘列 + 侧栏 ───────────────────────────────── */
 
 .game {
-	--board: min(calc(100dvh - var(--topbar) - 132px), calc(100vw - 440px), 760px);
+	--board: min(calc(100dvh - var(--topbar) - 140px), calc(100vw - 440px), 760px);
 	display: flex;
 	justify-content: center;
 	align-items: flex-start;
@@ -303,9 +303,22 @@ body[data-view="3d"] .board-wrap { visibility: hidden; box-shadow: none; }
 body[data-view="3d"] dialog.sheet { background: #131a27; }
 body[data-view="3d"] .moves li:nth-child(odd) { background: rgba(255, 255, 255, .04); }
 
-/* ── 窄屏（手机竖屏）：棋盘铺满宽度，侧栏落到棋盘下方，操作条吸底 ── */
+/* ── 横屏矮屏（手机横放）：仍左右分栏，压缩顶栏与玩家栏，把高度留给棋盘 ── */
 
-@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+@media (max-height: 560px) and (min-aspect-ratio: 6/5) {
+	:root { --topbar: 44px; }
+	.game { --board: min(calc(100dvh - var(--topbar) - 84px), calc(100vw - 380px)); padding: 0 12px 8px; gap: 16px; }
+	.player { min-height: 30px; }
+	.avatar { width: 26px; height: 26px; border-radius: 7px; }
+	.psub { display: none; }
+	.side { width: 320px; padding-top: 34px; gap: 8px; }
+	.card { padding: 10px 12px; }
+	.cbtn { padding: 6px 0 5px; }
+}
+
+/* ── 竖屏（手机、平板竖放）：棋盘铺满宽度，侧栏落到棋盘下方，操作条吸底 ── */
+
+@media (max-aspect-ratio: 6/5), (max-width: 640px) {
 	:root { --topbar: 50px; }
 	.topbar { padding: 0 10px; }
 	.brand b { font-size: 16px; }

@@ -27,7 +27,16 @@ const dataUri = svg => 'data:image/svg+xml,' + svg
 	.replace(/>/g, '%3E')
 	.replace(/\s+/g, ' ');
 
-let css = '/* 生成文件，勿手改：npm run pieces（源：assets/pieces/，许可见该目录 README） */\n';
+// /*! */ 是法律注释，打包压缩后仍保留在 index.html 里，满足 MIT/Apache 随附声明的要求。
+let css = `/* 生成文件，勿手改：npm run pieces（源：assets/pieces/，许可全文见该目录） */
+/*! Chess pieces "celtic" and "fantasy" — Copyright (c) Maurizio Monge — MIT License
+    (https://github.com/maurimo/chess-art/blob/main/LICENSE): Permission is hereby granted, free of charge,
+    to any person obtaining a copy of this software and associated documentation files, to deal in the
+    Software without restriction, subject to including the copyright notice and this permission notice.
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+    Chess pieces "chessnut" — Copyright Alexis Luengas — Apache License 2.0
+    (https://www.apache.org/licenses/LICENSE-2.0, https://github.com/LexLuengas/chessnut-pieces). Unmodified except SVG minification. */
+`;
 let raw = 0, packed = 0;
 for (const set of SETS) {
 	const files = new Set(await readdir(path.join(root, 'assets/pieces', set)));

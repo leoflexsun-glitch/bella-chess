@@ -234,7 +234,9 @@ export const LEVELS = {
 	novice: { depth: 2, ms: 220, blunder: 0.34, spread: 90 },
 	club: { depth: 4, ms: 700, blunder: 0.12, spread: 45 },
 	expert: { depth: 6, ms: 1600, blunder: 0.03, spread: 18 },
-	master: { depth: 8, ms: 3200, blunder: 0, spread: 0 }
+	master: { depth: 8, ms: 3200, blunder: 0, spread: 0 },
+	// 给人类的"提示一步"：不抽样、不失误，但限时短一点，别让人等。
+	hint: { depth: 7, ms: 1200, blunder: 0, spread: 0 }
 };
 
 export function search(pos, { level = 'club', nodeBudget = 4e6 } = {}) {

@@ -33,7 +33,6 @@ export function createTable(scene, bursts) {
 	const tweens = [];
 	const meshes = [];
 	let badgesOn = false;
-	let badgeIcons = false;
 
 	function spawn(type, color, sq) {
 		const mesh = new THREE.Mesh(geometries[type], pieceMaterial(color === WHITE ? 'ivory' : 'obsidian'));
@@ -47,13 +46,9 @@ export function createTable(scene, bursts) {
 		group.add(mesh);
 		meshes.push(mesh);
 
-		mesh.visible = !badgeIcons;
-
 		const badge = createBadge(type, color);
-		if (badgeIcons) badge.material.map = badge.userData.maps.icon;
 		badge.visible = badgesOn;
 		badge.material.opacity = badgesOn ? 1 : 0;
-		if (badgeIcons) badge.scale.set(0.80, 0.80, 1);
 		group.add(badge);
 
 		const entry = { mesh, badge, type, color, sq, lift: 0, selected: false, bob: Math.random() * 6.28 };
@@ -74,7 +69,7 @@ export function createTable(scene, bursts) {
 		for (const entry of bySquare.values()) destroy(entry);
 		bySquare.clear();
 		// 正在碎裂的棋子已不在 bySquare 里，这里一并销毁；
-		// 否则悔棋/重开发生在碎裂窗口内时，2D 图标会冻结成残影。
+		// 否则悔棋/重开发生在碎裂窗口内时，碎到一半的棋子会冻结成残影。
 		for (const entry of vanishingPieces) destroy(entry);
 		vanishingPieces.clear();
 		tweens.length = 0;
@@ -102,27 +97,12 @@ export function createTable(scene, bursts) {
 		entry.vanishing = true;
 		vanishingPieces.add(entry);
 		logEvent('VANISH', `${entry.color===WHITE?'W':'B'}${entry.type}@sq${entry.sq} tweens=${tweens.length}`);
-		// 2D 模式下图标就是棋子本体，必须跟着碎裂动画一起缩小消失；
-		// 3D 模式徽章照旧直接隐藏。
-		const badgeScale = entry.badge.scale.x;
-		if (badgeIcons) {
-			// 2D 模式把被吃棋子的图标锁进公告板渲染层级，
-			// 碎裂缩小期间不会被吃子方棋子的透明描边残影盖住。
-			entry.badge.renderOrder = 7;
-			entry.badge.visible = true;
-			entry.badge.position.copy(from).setY(0.02);
-		} else {
-			entry.badge.visible = false;
-		}
+		// 徽章不跟碎裂动画，直接隐藏。
+		entry.badge.visible = false;
 		tween(0.52, k => {
 			entry.mesh.position.y = from.y + easeOut(k) * 0.7;
 			entry.mesh.rotation.y += 0.16;
 			entry.mesh.scale.setScalar(Math.max(0.001, 1 - easeOut(k)));
-			if (badgeIcons) {
-				const s = Math.max(0.001, badgeScale * (1 - easeOut(k)));
-				entry.badge.scale.set(s, s, 1);
-				entry.badge.material.opacity = 1 - easeOut(k);
-			}
 		}, () => {
 			vanishingPieces.delete(entry);
 			bursts.emit(from.clone().setY(from.y + 0.3), 34, {
@@ -182,11 +162,6 @@ export function createTable(scene, bursts) {
 						mover.type = move_.promotion;
 						mover.mesh.geometry = geometries[move_.promotion];
 						const swap = createBadge(move_.promotion, mover.color);
-						// 2D 模式：升变后的新徽章同样用棋形图标大图标，别缩成小字母牌。
-						if (badgeIcons) {
-							swap.material.map = swap.userData.maps.icon;
-							swap.scale.set(0.80, 0.80, 1);
-						}
 						swap.visible = mover.badge.visible;
 						swap.material.opacity = mover.badge.material.opacity;
 						group.remove(mover.badge);
@@ -267,15 +242,6 @@ export function createTable(scene, bursts) {
 			badgesOn = on;
 			for (const entry of bySquare.values()) entry.badge.visible = on;
 		},
-		// 扁平 2D 模式：藏起立体棋子，棋形图标放大撑满格子，直接当棋子。
-		setBadgeIcons(on) {
-			badgeIcons = on;
-			for (const entry of bySquare.values()) {
-				entry.mesh.visible = !on;
-				entry.badge.material.map = on ? entry.badge.userData.maps.icon : entry.badge.userData.maps.letter;
-				entry.badge.scale.set(on ? 0.80 : 0.26, on ? 0.80 : 0.30, 1);
-			}
-		},
 		update(dt, time) {
 			for (let i = tweens.length - 1; i >= 0; i--) {
 				const tw = tweens[i];
@@ -297,14 +263,10 @@ export function createTable(scene, bursts) {
 				if (entry.badge.visible) {
 					entry.badge.position.set(
 						entry.mesh.position.x,
-						badgeIcons ? 0.02 : entry.mesh.position.y + PIECE_TOP[entry.type] + 0.26,
+						entry.mesh.position.y + PIECE_TOP[entry.type] + 0.26,
 						entry.mesh.position.z
 					);
-					// 扁平图标准直出，不做淡入——二维界面不应有呼吸感。
-					// 碎裂中的棋子 opacity/缩放由碎裂 tween 全权驱动，这里绝不能回写，
-					// 否则长对局里动画链一长，被吃棋子会被每帧拽回完整图标（残影根因）。
-					if (badgeIcons) { if (!entry.vanishing) entry.badge.material.opacity = 1; }
-					else entry.badge.material.opacity += (1 - entry.badge.material.opacity) * Math.min(1, dt * 6);
+					entry.badge.material.opacity += (1 - entry.badge.material.opacity) * Math.min(1, dt * 6);
 				}
 			}
 		}

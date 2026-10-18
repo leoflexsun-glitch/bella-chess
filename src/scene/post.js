@@ -71,14 +71,11 @@ export function createPost(renderer, scene, camera, cfg) {
 	composer.addPass(grade);
 
 	let time = 0;
-	let flat = false;
-	let current = cfg;
 	apply(cfg);
 
 	function apply(next) {
-		current = next;
-		bloom.enabled = next.bloom && !flat;
-		grade.uniforms.uAmount.value = flat ? 0 : (next.grade ? 1 : 0.45);
+		bloom.enabled = next.bloom;
+		grade.uniforms.uAmount.value = next.grade ? 1 : 0.45;
 	}
 
 	return {
@@ -94,8 +91,6 @@ export function createPost(renderer, scene, camera, cfg) {
 			bloom.setSize(w, h);
 			grade.uniforms.uResolution.value.set(w, h);
 		},
-		setQuality: apply,
-		// 扁平（二维俯瞰）模式：关掉泛光和分级，浅色棋盘不被洗白。
-		setFlat(on) { flat = on; apply(current); }
+		setQuality: apply
 	};
 }

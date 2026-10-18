@@ -1,7 +1,7 @@
 // 控制器：对局流程、选子与走子、设置、视图切换。
 // 视图（2D 棋盘 / 3D 雪林）只负责显示与把指针动作翻译成意图，二者接口一致、可随时互换。
 
-import { WHITE, BLACK, CAPTURE, fromFen, inCheck, colorOf, START_FEN } from './chess/engine.js';
+import { WHITE, BLACK, CAPTURE, fromFen, inCheck, colorOf, sanOf, START_FEN } from './chess/engine.js';
 import { balance } from './chess/material.js';
 import { createMatch } from './game/match.js';
 import { createBoard2d } from './view2d/board.js';
@@ -38,6 +38,7 @@ let promoting = false;
 let reviewPly = null;      // 正在查看的历史半步；null = 当前局面
 let flipped = false;
 let resignArmed = 0;
+let hintArrow = null;      // 电脑给出的提示着法 { from, to }，走子或悔棋后清除
 
 const shell = createShell({ onAction: handleAction, onSetting: changeSetting, onMoveClick: reviewTo });
 
@@ -75,6 +76,7 @@ let view = view2d;
 const match = createMatch({
 	onReset: () => {
 		clearSelection();
+		hintArrow = null;
 		reviewPly = null;
 		view.setPosition(match.state.pos);
 		refresh();
@@ -84,6 +86,7 @@ const match = createMatch({
 		refresh();
 	},
 	onMove: (move, { mover, captured }) => {
+		hintArrow = null;
 		if (reviewPly === null) view.playMove(move, match.state.pos);
 		if (captured) audio.capture(); else audio.place();
 		if (mover !== match.state.human) clearSelection();
@@ -121,7 +124,8 @@ function refresh() {
 		lastMove,
 		selected,
 		targets: settings.hints === 'on' ? legal.map(m => ({ sq: m.to, capture: Boolean(m.flags & CAPTURE) })) : [],
-		check: checked
+		check: checked,
+		arrow: reviewPly === null ? hintArrow : null
 	});
 
 	// 玩家栏：下方是靠近自己的一侧
@@ -158,7 +162,7 @@ function refresh() {
 	shell.setControl('undo', { disabled: !playing || !s.history.some(h => h.mover === s.human) });
 	shell.setControl('resign', { disabled: !playing || Boolean(s.over) });
 	shell.setControl('copy', { disabled: !s.history.length && s.startFen === START_FEN });
-	shell.setControl('hints', { on: settings.hints === 'on' });
+	shell.setControl('hint', { disabled: !canMove() });
 
 	persist();
 }
@@ -278,6 +282,18 @@ function reviewTo(ply) {
 	refresh();
 }
 
+function askHint() {
+	if (!canMove()) { audio.deny(); return; }
+	const pos = match.state.pos;
+	const asked = match.suggest(move => {
+		if (!move) return;
+		hintArrow = { from: move.from, to: move.to };
+		shell.toast(`提示：${sanOf(pos, move)}`, 2600);
+		refresh();
+	});
+	if (asked) shell.toast('正在替你想一步…', 1400);
+}
+
 function flip() {
 	flipped = !flipped;
 	view.setFlipped(flipped);
@@ -327,7 +343,7 @@ function handleAction(act) {
 		case 'takeback':
 		case 'undo': takeBack(); break;
 		case 'flip': flip(); break;
-		case 'hints': changeSetting('hints', settings.hints === 'on' ? 'off' : 'on'); break;
+		case 'hint': askHint(); break;
 		case 'copy': copyText(match.pgn(), '棋谱已复制（PGN）'); break;
 		case 'resign':
 			if (!playing || match.state.over) break;
@@ -368,7 +384,7 @@ addEventListener('keydown', event => {
 	const key = event.key.toLowerCase();
 	if (key === 'f') flip();
 	else if (key === 'u') takeBack();
-	else if (key === 'h') handleAction('hints');
+	else if (key === 'h') askHint();
 	else if (key === 'v') changeSetting('view', settings.view === '2d' ? '3d' : '2d');
 	else if (key === 'arrowleft') { handleAction('review-prev'); event.preventDefault(); }
 	else if (key === 'arrowright') { handleAction('review-next'); event.preventDefault(); }

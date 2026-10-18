@@ -14,12 +14,6 @@ const VIEWS = {
 	over: { radius: 12.6, polar: 0.14, yaw: 0, label: '俯瞰' }
 };
 
-// 二维模式：同一副 3D 棋盘，只是被钉在正上方。90° 俯瞰、
-// 俯瞰模式：同一副 3D 棋盘，被钉在正上方 90°。
-// 往 z 轴偏 0.35：太小会让 up 向量与视线平行导致万向锁，
-// 这个偏移同时决定"上"是棋盘的远端（白方视角）。
-const TOPDOWN = { offset: 0.35, fov: 42, fit: 4.35 };
-
 export function createStage(canvas, quality = 'high') {
 	const cfg = QUALITY[quality] || QUALITY.high;
 
@@ -76,7 +70,6 @@ export function createStage(canvas, quality = 'high') {
 		azimuth: 0,
 		view: 'seat',
 		flipped: false,
-		topdown: false,
 		frames: [],
 		measured: false
 	};
@@ -87,53 +80,26 @@ export function createStage(canvas, quality = 'high') {
 		camera.updateProjectionMatrix();
 		renderer.setSize(w, h);
 		post.setSize(w, h);
-		// 俯瞰下视野随宽高比变化，重新钉一次保证棋盘完整入画。
-		if (state.topdown && !state.attract) {
-			camera.position.copy(topDownPosition());
-			camera.lookAt(controls.target);
-		}
 	}
 	addEventListener('resize', resize);
 
 	// 把相机平滑地送到命名预设位，之后不再与 OrbitControls 打架。
 	let glide = null;
-	// 俯瞰时相机高度按视野自适应：棋盘连同字母边框（半边 5.4）
-	// 必须在任何宽高比下都完整入画，取水平/垂直两个方向里更高的那个。
-	function topDownPosition() {
-		const off = state.flipped ? -TOPDOWN.offset : TOPDOWN.offset;
-		const vfov = THREE.MathUtils.degToRad(camera.fov) / 2;
-		const hfov = Math.atan(Math.tan(vfov) * camera.aspect);
-		const height = Math.max(TOPDOWN.fit / Math.tan(vfov), TOPDOWN.fit / Math.tan(hfov));
-		return new THREE.Vector3(controls.target.x, controls.target.y + height, controls.target.z + off);
-	}
 
 	function moveTo(view, { instant = false } = {}) {
 		state.view = view;
-		let target;
-		if (state.topdown) {
-			target = topDownPosition();
-		} else {
-			const preset = VIEWS[view] || VIEWS.seat;
-			const azimuth = (preset.yaw || 0) + (state.flipped ? Math.PI : 0);
-			target = new THREE.Vector3(
-				Math.sin(azimuth) * Math.sin(preset.polar),
-				Math.cos(preset.polar),
-				Math.cos(azimuth) * Math.sin(preset.polar)
-			).multiplyScalar(preset.radius).add(controls.target);
-		}
+		const preset = VIEWS[view] || VIEWS.seat;
+		const azimuth = (preset.yaw || 0) + (state.flipped ? Math.PI : 0);
+		const target = new THREE.Vector3(
+			Math.sin(azimuth) * Math.sin(preset.polar),
+			Math.cos(preset.polar),
+			Math.cos(azimuth) * Math.sin(preset.polar)
+		).multiplyScalar(preset.radius).add(controls.target);
 		if (instant) { camera.position.copy(target); controls.update(); return; }
 		glide = { from: camera.position.clone(), to: target, t: 0, dur: 1.05 };
 	}
 
 	function step(dt) {
-		// 俯瞰模式优先：相机钉死在正上方，任何其他逻辑都不得碰。
-		if (state.topdown) {
-			glide = null;
-			camera.position.copy(topDownPosition());
-			camera.lookAt(controls.target);
-			return;
-		}
-
 		if (glide) {
 			glide.t = Math.min(1, glide.t + dt / glide.dur);
 			const e = glide.t < 0.5 ? 4 * glide.t ** 3 : 1 - (-2 * glide.t + 2) ** 3 / 2;
@@ -214,43 +180,13 @@ export function createStage(canvas, quality = 'high') {
 		moveTo,
 		setAttract(on) {
 			state.attract = on;
-			controls.enabled = !on && !state.topdown;
+			controls.enabled = !on;
 			if (!on) moveTo(state.view);
 		},
 		flip() {
 			state.flipped = !state.flipped;
 			moveTo(state.view);
 			return state.flipped;
-		},
-		// 俯瞰（二维）模式：钉住相机在正上方、锁定轨道。
-		// 退出时必须完整恢复轨道控制——否则回不去 3D，视角也转不动。
-		setTopDown(on) {
-			if (state.topdown === on) return;
-			state.topdown = on;
-			post.setFlat(on);
-			camera.fov = on ? TOPDOWN.fov : 42;
-			camera.updateProjectionMatrix();
-			if (on) {
-				controls.enabled = false;
-				controls.enableZoom = false;
-				controls.enableRotate = false;
-				controls.enableDamping = false;
-				glide = null;
-				// 干净浅色背景，不要雪夜的雾。
-				state.savedFog = scene.fog;
-				scene.fog = null;
-				scene.background = new THREE.Color(0xeef0f2);
-				camera.position.copy(topDownPosition());
-				camera.lookAt(controls.target);
-			} else {
-				controls.enabled = !state.attract;
-				controls.enableZoom = true;
-				controls.enableRotate = true;
-				controls.enableDamping = true;
-				scene.fog = state.savedFog || null;
-				scene.background = null;
-				moveTo(state.view, { instant: true });
-			}
 		},
 		cycleView() {
 			const order = Object.keys(VIEWS);
