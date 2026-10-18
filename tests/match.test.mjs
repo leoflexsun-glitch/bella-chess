@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { WHITE, BLACK, parseSquare, toFen } from '../src/chess/engine.js';
 
 const posted = [];
-globalThis.Worker = class { constructor() { this.onmessage = null; } postMessage(msg) { posted.push(msg); } terminate() {} };
+globalThis.Worker = class { constructor() { this.onmessage = null; globalThis.__lastWorker = this; } postMessage(msg) { posted.push(msg); } terminate() {} };
 const { createMatch } = await import('../src/game/match.js');
 
 beforeEach(() => { posted.length = 0; });
@@ -109,4 +109,31 @@ test('终局后认输无效，悔棋可以接着下', () => {
 	assert.ok(m.undo());
 	assert.equal(m.state.over, null);
 	assert.equal(m.state.history.length, 3);
+});
+
+test('从识别/摆棋的局面开局总是全新一局：棋谱、结局、悔棋记录全部清空', () => {
+	const m = createMatch();
+	// 上一局：走了几步并且已经结束
+	m.restore({ human: BLACK, moves: ['f2f3', 'e7e5', 'g2g4', 'd8h4'] });
+	assert.equal(m.state.over.reason, 'checkmate');
+	const fen = 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3';
+	m.newGame({ human: WHITE, fen });
+	assert.equal(m.state.history.length, 0);
+	assert.equal(m.state.over, null);
+	assert.equal(m.state.startFen, fen);
+	assert.equal(toFen(m.state.pos), fen);
+	assert.equal(m.undo(), false, '新局里没有可悔的棋，不能退回上一局');
+	assert.equal(m.pgn(), `[SetUp "1"]\n[FEN "${fen}"]\n\n*`);
+});
+
+test('上一局未返回的提示在开新局后作废', async () => {
+	const m = createMatch();
+	m.newGame({ human: WHITE });
+	let result = 'pending';
+	assert.ok(m.suggest(move => { result = move; }));
+	const hintMsg = posted.at(-1);
+	m.newGame({ human: WHITE });
+	// 旧提示的结果迟到：必须被丢弃，不回调
+	globalThis.__lastWorker?.onmessage?.({ data: { type: 'result', id: hintMsg.id, from: 'e2', to: 'e4' } });
+	assert.equal(result, 'pending');
 });

@@ -113,6 +113,25 @@ await scenario('摆棋编辑器：清空、放子、校验、从该局面开局'
 	assert.equal(await page.locator('#board2d .pc').count(), 3);
 });
 
+await scenario('对局进行中从摆棋/识别结果开局：一定是全新一局', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	// 识别结果和摆棋走同一个编辑器入口
+	await page.click('.topbar [data-act="setup"]');
+	await page.fill('#ed-fen', '6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1');
+	await page.press('#ed-fen', 'Enter');
+	await page.click('#editor [data-ed="play"]');
+	await page.waitForTimeout(300);
+	assert.equal((await moves(page)).length, 0, '棋谱应清空');
+	assert.ok(await page.isDisabled('.controls [data-act="undo"]'), '新局不能悔回上一局');
+	assert.ok(await page.isHidden('[data-slot=result]'));
+	const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')));
+	assert.deepEqual([saved.fen, saved.moves.length], ['6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1', 0]);
+});
+
 await scenario('设置：棋盘主题与棋子套装', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
 	await page.click('#dlg-new [data-act="start"]');

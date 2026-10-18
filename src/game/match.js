@@ -93,8 +93,10 @@ export function createMatch(hooks = {}) {
 		state.thinking = false;
 	}
 
+	// 开新局（包括拍照/摆棋得到的局面）一律从零开始：上一局的思考、提示、棋谱、结局全部作废。
 	function reset({ human = WHITE, level = 'club', fen = START_FEN } = {}) {
 		cancelThinking();
+		hint = null;
 		state.pos = normalize(fromFen(fen));
 		state.startFen = toFen(state.pos);
 		state.history = [];

@@ -250,7 +250,11 @@ function attempt(from, to) {
 
 // ── 流程 ─────────────────────────────────────────────────────────
 
+// 任何入口（新对局、再来一局、摆棋、拍照复刻）都是一盘全新的对局：
+// 先收掉上一局遗留的升变选择、复盘位置，再交给 match 清空棋谱。
 function startGame({ human, level = settings.level, fen = START_FEN }) {
+	if (promoting) { board2d.cancelPromotion(); shell.close('dlg-promo'); }
+	reviewPly = null;
 	playing = true;
 	flipped = human === BLACK;
 	view.setFlipped(flipped);
