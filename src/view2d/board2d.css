@@ -1,0 +1,127 @@
+/* 2D 棋盘。尺寸由外层决定（正方形容器），内部一律用百分比，任何像素密度下都锐利。 */
+
+@import './pieces.css';
+
+/* ── 棋盘主题：格色、上一步、选中、走子提示 ───────────────── */
+
+[data-board="green"] {
+	--sq-light: #eeeed2;
+	--sq-dark: #769656;
+	--hl-last: rgba(246, 246, 105, .58);
+	--hl-sel: rgba(246, 246, 105, .75);
+	--hint: rgba(0, 0, 0, .16);
+	--coord-on-light: #5c7a43;
+	--coord-on-dark: #f3f3dc;
+	--accent: #5d8a3c;
+}
+[data-board="brown"] {
+	--sq-light: #f0d9b5;
+	--sq-dark: #b58863;
+	--hl-last: rgba(155, 199, 0, .45);
+	--hl-sel: rgba(20, 85, 30, .45);
+	--hint: rgba(20, 85, 30, .5);
+	--coord-on-light: #946f51;
+	--coord-on-dark: #f6e7cf;
+	--accent: #8b5a2b;
+}
+[data-board="blue"] {
+	--sq-light: #dee3e6;
+	--sq-dark: #8ca2ad;
+	--hl-last: rgba(155, 199, 0, .42);
+	--hl-sel: rgba(20, 85, 30, .45);
+	--hint: rgba(20, 85, 30, .5);
+	--coord-on-light: #72888f;
+	--coord-on-dark: #eef2f4;
+	--accent: #4c7286;
+}
+
+.b2d {
+	position: relative;
+	width: 100%;
+	aspect-ratio: 1;
+	/* a8（左上）是浅格：conic 起点在正上方顺时针，第一象限画深格。 */
+	background: conic-gradient(var(--sq-dark) 0 25%, var(--sq-light) 0 50%, var(--sq-dark) 0 75%, var(--sq-light) 0) 0 0 / 25% 25%;
+	border-radius: 4px;
+	overflow: hidden;
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-touch-callout: none;
+	-webkit-tap-highlight-color: transparent;
+	container-type: inline-size;
+}
+
+.b2d-marks, .b2d-coords, .b2d-pieces, .b2d-promo { position: absolute; inset: 0; }
+.b2d-coords, .b2d-marks { pointer-events: none; }
+/* 坐标压在棋子之上（同 Lichess），底行字母不会被棋子挡住。 */
+.b2d-coords { z-index: 4; }
+
+/* 每个格内元素：12.5% 见方，靠 --x/--y 平移整格。 */
+.b2d .pc, .b2d .mk, .promo-choice {
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 12.5%;
+	height: 12.5%;
+	transform: translate(calc(var(--x) * 100%), calc(var(--y) * 100%));
+}
+
+/* ── 棋子 ─────────────────────────────────────────────────── */
+
+.pc {
+	display: block;
+	background-size: cover;
+	background-repeat: no-repeat;
+	will-change: transform;
+}
+.b2d .pc { cursor: pointer; transition: transform 190ms cubic-bezier(.25, .8, .35, 1); z-index: 2; }
+.b2d .pc.moving { z-index: 3; }
+.b2d .pc.drag {
+	transition: none;
+	z-index: 10;
+	cursor: grabbing;
+	filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .28));
+}
+.b2d .pc.snap { transition: none; }
+.b2d .pc.gone { opacity: 0; transform: translate(calc(var(--x) * 100%), calc(var(--y) * 100%)) scale(.6); transition: opacity 160ms ease, transform 160ms ease; }
+
+/* ── 高亮 ─────────────────────────────────────────────────── */
+
+.mk.last { background: var(--hl-last); }
+.mk.sel { background: var(--hl-sel); }
+.mk.dot { background: radial-gradient(circle, var(--hint) 0 17%, transparent 18%); }
+.mk.cap { background: radial-gradient(circle, transparent 0 79%, var(--hint) 80%); }
+.mk.check { background: radial-gradient(circle, rgba(255, 30, 0, .95) 0, rgba(231, 0, 0, .55) 32%, rgba(169, 0, 0, 0) 72%); }
+.mk.hover { box-shadow: inset 0 0 0 max(2px, .6cqi) rgba(255, 255, 255, .75); }
+.mk.warn { box-shadow: inset 0 0 0 max(2px, .55cqi) #f08a24; background: rgba(240, 138, 36, .18); }
+
+/* ── 坐标：贴在格内（底边文件字母、左边行号），颜色与所在格反差 ───── */
+
+.b2d-coords span {
+	position: absolute;
+	font: 600 max(9px, 2.3cqi)/1 var(--sans, system-ui);
+	letter-spacing: 0;
+}
+.b2d-coords .cf { left: calc(var(--x) * 12.5% + 12.5% - .5em - 2px); bottom: 2px; }
+.b2d-coords .cr { top: calc(var(--y) * 12.5% + 2px); left: 3px; }
+.b2d-coords .on-light { color: var(--coord-on-light); }
+.b2d-coords .on-dark { color: var(--coord-on-dark); }
+[data-coords="off"] .b2d-coords { display: none; }
+
+/* ── 升变 ─────────────────────────────────────────────────── */
+
+.b2d-promo { z-index: 20; background: rgba(20, 20, 20, .45); }
+.promo-choice {
+	border: 0;
+	padding: 0;
+	cursor: pointer;
+	background: radial-gradient(circle, #fff 0 52%, #c9ccd1 100%);
+	border-radius: 50%;
+	transition: border-radius 120ms ease, background 120ms ease;
+}
+.promo-choice:hover { border-radius: 8%; background: #fff; }
+.promo-choice .pc { width: 100%; height: 100%; position: static; transform: scale(.88); }
+
+@media (prefers-reduced-motion: reduce) {
+	.b2d .pc { transition: none; }
+}

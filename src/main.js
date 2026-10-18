@@ -1,488 +1,419 @@
-import * as THREE from 'three';
-import { createStage } from './scene/stage.js';
-import { createLighting } from './scene/lighting.js';
-import { createSky } from './world/sky.js';
-import { createGround } from './world/ground.js';
-import { createForest } from './world/forest.js';
-import { createSnowfall } from './world/snowfall.js';
-import { createProps } from './world/props.js';
-import { createBoard, worldToSquare } from './game/board.js';
-import { createTable } from './game/table.js';
-import { createBursts } from './game/fx.js';
+// 控制器：对局流程、选子与走子、设置、视图切换。
+// 视图（2D 棋盘 / 3D 雪林）只负责显示与把指针动作翻译成意图，二者接口一致、可随时互换。
+
+import { WHITE, BLACK, CAPTURE, fromFen, inCheck, colorOf, START_FEN } from './chess/engine.js';
+import { balance } from './chess/material.js';
 import { createMatch } from './game/match.js';
-import { createHud } from './ui/hud.js';
-import { createMenu, loadSettings } from './ui/menu.js';
+import { createBoard2d } from './view2d/board.js';
+import { createView3d } from './view3d/view3d.js';
+import { createShell } from './ui/shell.js';
+import { loadSettings, saveSettings, saveGame, loadGame } from './ui/settings.js';
 import { createAudio } from './core/audio.js';
-import { WHITE, BLACK, QUEEN, CAPTURE, colorOf } from './chess/engine.js';
+import { createEditor } from './editor/editor.js';
+import { createPhoto } from './editor/photo.js';
 
-const settings = loadSettings();
-const audio = createAudio();
-audio.enabled = settings.sound === 'on';
-
-const boot = document.getElementById('boot');
-const bootMsg = document.querySelector('[data-slot="boot"]');
-const canvas = document.getElementById('stage');
-
-const SIDE_TEXT = { [WHITE]: '象牙', [BLACK]: '黑曜' };
+const SIDE = { [WHITE]: '白方', [BLACK]: '黑方' };
 const LEVEL_TEXT = { novice: '新手', club: '棋社', expert: '专家', master: '大师' };
-const QUALITY_TEXT = { ultra: '极致', high: '高', low: '低' };
 const REASON_TEXT = {
 	checkmate: '将杀',
 	resignation: '认输',
-	'flag fall': '超时判负',
 	stalemate: '逼和',
 	'fifty-move rule': '五十回合规则',
 	'insufficient material': '子力不足',
 	'threefold repetition': '三次重复局面'
 };
 
-const stage = createStage(canvas, settings.quality);
-const { scene, camera, renderer } = stage;
-
-bootMsg.textContent = '正在唤醒雪林…';
-
-const lighting = createLighting(scene, stage.state.cfg);
-const sky = createSky(scene, lighting.sunDir);
-const ground = createGround(scene);
-const forest = createForest(scene, stage.state.cfg);
-const snowfall = createSnowfall(scene, stage.state.cfg);
-const props = createProps(scene);
-const bursts = createBursts(scene);
-
-// 只从天空穹顶烘出来的一次性辐照环境贴图——便宜，而且正是它
-// 让象牙和黑曜带上冷冽开阔的天光感。
-{
-	const envScene = new THREE.Scene();
-	envScene.add(new THREE.Mesh(new THREE.SphereGeometry(20, 32, 24), sky.dome.material));
-	const pmrem = new THREE.PMREMGenerator(renderer);
-	scene.environment = pmrem.fromScene(envScene, 0, 0.5, 60).texture;
-	scene.environmentIntensity = 0.9;
-	pmrem.dispose();
-}
-
-// 字体就绪前不建棋盘（棋子纹理要等字形），但顶层 await 会挡打包，用微任务代替。
-let fontReady = Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 2500))]);
-
-const board = createBoard(scene);
-const table = createTable(scene, bursts);
-
-board.setHints(settings.hints === 'on');
-// 手机/触屏：着色器提示在 mediump 精度下会丢，强制启用实体网格提示。
-if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) board.setOverlay(true);
-
-table.setBadges(settings.badges === 'on');
-snowfall.setDensity(settings.snow === 'heavy' ? 1 : settings.snow === 'light' ? 0.45 : 0);
+const settings = loadSettings();
+const audio = createAudio();
+audio.enabled = settings.sound === 'on';
+const body = document.body;
 
 // ── 状态 ────────────────────────────────────────────────────────
 
+let playing = false;      // 有一局正在进行（或刚结束、可悔棋）
 let selected = -1;
 let legal = [];
-let paused = false;
-let playing = false;
-let reviewing = false;
-let checkSq = -1;
+let pendingDeselect = false;
+let promoting = false;
+let reviewPly = null;      // 正在查看的历史半步；null = 当前局面
+let flipped = false;
+let resignArmed = 0;
 
-const hud = createHud({ onTool: tool => handleTool(tool) });
+const shell = createShell({ onAction: handleAction, onSetting: changeSetting, onMoveClick: reviewTo });
+
+// ── 视图 ────────────────────────────────────────────────────────
+
+const intents = {
+	active: () => canMove(),
+	press: pressSquare,
+	release: releaseSquare
+};
+
+const board2d = createBoard2d(document.getElementById('board2d'), intents);
+const view2d = {
+	kind: '2d',
+	show(pos) { board2d.setPosition(pos); },
+	hide() { board2d.cancelPromotion(); },
+	setPosition: pos => board2d.setPosition(pos),
+	playMove: (move, after) => board2d.playMove(move, after),
+	setMarks: marks => board2d.setMarks(marks),
+	setFlipped: on => board2d.setFlipped(on),
+	askPromotion: (to, color) => board2d.askPromotion(to, color),
+	isIdle: () => board2d.isIdle()
+};
+const view3d = createView3d({
+	canvas: document.getElementById('stage'),
+	settings,
+	intents,
+	askPromotion: color => shell.askPromotion(color),
+	onQualityDrop: next => shell.toast(`画质已自动降到${{ ultra: '极致', high: '高', low: '低' }[next]}，以保持流畅`, 3600)
+});
+let view = view2d;
+
+// ── 对局 ────────────────────────────────────────────────────────
 
 const match = createMatch({
 	onReset: () => {
-		table.sync(match.state.pos);
-		selected = -1;
-		legal = [];
-		checkSq = -1;
-		board.clearMarks();
-		markLastMove();
+		clearSelection();
+		reviewPly = null;
+		view.setPosition(match.state.pos);
 		refresh();
 	},
 	onTurn: (color, check) => {
-		hud.setTurn(color === WHITE ? 'w' : 'b', { thinking: match.state.thinking, check });
-		board.clearMarks([2]);
-		checkSq = check ? match.state.pos.kings[color >> 3] : -1;
-		if (check) {
-			board.setMark(match.state.pos.kings[color >> 3], 2, 1);
-			audio.check();
-		}
+		if (check) audio.check();
 		refresh();
 	},
-	onMove: (move, { san, mover, captured }) => {
-		table.playMove(move);
-		// 动画落定后对一次账：桌面棋子与逻辑状态不一致（残子/缺子）立即自愈并留日志。
-		// 引擎着法也要审计（引擎吃你子时同样是竞态高发区）。
-		const auditOnce = () => { if (table.isIdle()) table.audit(match.state.pos); else setTimeout(auditOnce, 120); };
-		setTimeout(auditOnce, 60);
+	onMove: (move, { mover, captured }) => {
+		if (reviewPly === null) view.playMove(move, match.state.pos);
 		if (captured) audio.capture(); else audio.place();
-		selected = -1;
-		legal = [];
-		board.clearMarks([0, 1]);
-		markLastMove(move);
+		if (mover !== match.state.human) clearSelection();
 		refresh();
-		if (mover !== match.state.human) hud.toast(`${SIDE_TEXT[mover]}走出 ${san}`, 2000);
 	},
-	onThink: color => hud.setTurn(color === WHITE ? 'w' : 'b', { thinking: true }),
-	onEnd: over => endGame(over),
-	onError: message => hud.toast(message)
+	onThink: () => refresh(),
+	onEnd: over => {
+		clearSelection();
+		const won = over.winner === match.state.human;
+		audio.end(won);
+		refresh();
+	},
+	onError: message => shell.toast(message)
 });
 
-// 棋盘自己留着一个走子历史通道，让上一步一直亮着。
-function markLastMove(move = match.state.lastMove) {
-	board.clearMarks([3]);
-	if (!move) return;
-	board.setMark(move.from, 3, 0.7);
-	board.setMark(move.to, 3, 1);
+function canMove() {
+	const s = match.state;
+	return playing && !s.over && !s.thinking && s.pos.turn === s.human && reviewPly === null && !promoting;
 }
+
+function currentPos() {
+	return reviewPly === null ? match.state.pos : fromFen(match.fenAfter(reviewPly));
+}
+
+// ── 刷新界面 ──────────────────────────────────────────────────────
 
 function refresh() {
-	const tally = match.tally();
-	hud.setMaterial(tally[WHITE], tally[BLACK]);
-	hud.setEval(match.state.eval);
-	hud.setLedger(match.state.history);
-	hud.setClocks(match.state.clocks[WHITE], match.state.clocks[BLACK]);
+	const s = match.state;
+	const pos = currentPos();
+
+	// 棋盘标记
+	const lastMove = reviewPly === null ? s.lastMove : (reviewPly >= 0 ? s.history[reviewPly].move : null);
+	const checked = inCheck(pos) ? pos.kings[pos.turn >> 3] : -1;
+	view.setMarks({
+		lastMove,
+		selected,
+		targets: settings.hints === 'on' ? legal.map(m => ({ sq: m.to, capture: Boolean(m.flags & CAPTURE) })) : [],
+		check: checked
+	});
+
+	// 玩家栏：下方是靠近自己的一侧
+	const bal = balance(pos);
+	const player = color => {
+		const human = playing && color === s.human;
+		return {
+			color,
+			name: !playing ? SIDE[color] : human ? '你' : '电脑',
+			sub: !playing ? '' : human ? SIDE[color] : `${SIDE[color]} · ${LEVEL_TEXT[s.level]}`,
+			extra: bal[color].extra,
+			score: bal[color].score,
+			thinking: playing && s.thinking && !human && reviewPly === null,
+			turn: playing && !s.over && pos.turn === color && reviewPly === null
+		};
+	};
+	const bottom = flipped ? BLACK : WHITE;
+	shell.setPlayers(player(bottom === WHITE ? BLACK : WHITE), player(bottom));
+
+	// 状态行
+	if (!playing) shell.setStatus('选择对局方式开始');
+	else if (s.over) shell.setStatus(resultText(s.over).title);
+	else if (reviewPly !== null) shell.setStatus('正在复盘');
+	else if (s.thinking) shell.setStatus('电脑思考中…');
+	else if (s.pos.turn === s.human) shell.setStatus(checked >= 0 ? '将军！轮到你走' : '轮到你走', { check: checked >= 0 });
+	else shell.setStatus(`轮到${SIDE[s.pos.turn]}`);
+
+	shell.setEval(s.eval);
+	shell.setMoves(s.history, reviewPly === null ? s.history.length - 1 : reviewPly);
+	shell.setReview(reviewPly === null ? null
+		: reviewPly < 0 ? `起始局面 · 共 ${s.history.length} 步` : `第 ${reviewPly + 1} / ${s.history.length} 步`);
+	shell.setResult(playing && s.over ? resultText(s.over) : null);
+
+	shell.setControl('undo', { disabled: !playing || !s.history.some(h => h.mover === s.human) });
+	shell.setControl('resign', { disabled: !playing || Boolean(s.over) });
+	shell.setControl('copy', { disabled: !s.history.length && s.startFen === START_FEN });
+	shell.setControl('hints', { on: settings.hints === 'on' });
+
+	persist();
 }
 
-// ── 选中 ────────────────────────────────────────────────────
+function resultText(over) {
+	const s = match.state;
+	const reason = REASON_TEXT[over.reason] || over.reason;
+	if (!over.winner) return { title: '和棋', sub: reason };
+	const won = over.winner === s.human;
+	return { title: won ? '你赢了！' : '你输了', sub: `${SIDE[over.winner]}胜 · ${reason}` };
+}
+
+function persist() {
+	const s = match.state;
+	if (!playing || s.over) { saveGame(null); return; }
+	saveGame({ fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped });
+}
+
+// ── 选子与走子（两个视图共用） ───────────────────────────────────
 
 function clearSelection() {
 	selected = -1;
 	legal = [];
-	table.select(-1);
-	board.clearMarks([0, 1]);
+	pendingDeselect = false;
 }
 
-function selectSquare(sq) {
-	const moves = match.movesFrom(sq);
-	if (!moves.length) { audio.deny(); return false; }
-	board.clearMarks([0, 1]);
+function select(sq) {
 	selected = sq;
-	legal = moves;
-	table.select(sq);
-	board.setMark(sq, 0, 1);
-	for (const move of moves) board.setMark(move.to, move.flags & CAPTURE ? 2 : 1, 1);
-	audio.lift();
-	return true;
+	legal = match.movesFrom(sq);
+	pendingDeselect = false;
+	if (legal.length) audio.lift(); else audio.deny();
+	refresh();
 }
 
-function attempt(target) {
-	const options = legal.filter(m => m.to === target);
-	if (!options.length) return false;
-	const from = selected;
+function pressSquare(sq) {
+	if (!canMove()) {
+		if (playing && reviewPly !== null) shell.toast('正在复盘 · 点「回到当前」继续下棋');
+		return false;
+	}
+	if (sq < 0) { clearSelection(); refresh(); return false; }
+	if (selected >= 0 && sq !== selected && legal.some(m => m.to === sq)) {
+		attempt(selected, sq);
+		return false;
+	}
+	const piece = match.state.pos.board[sq];
+	if (piece && colorOf(piece) === match.state.human) {
+		if (sq === selected) { pendingDeselect = true; return legal.length > 0; }
+		select(sq);
+		return legal.length > 0;
+	}
 	clearSelection();
-	if (options.length > 1 && options[0].promotion) {
-		hud.askPromotion(choice => { match.play(from, target, choice); });
-		hud.toast('选择兵升变的棋子');
+	refresh();
+	return false;
+}
+
+function releaseSquare(from, to, moved) {
+	if (!moved) {
+		if (pendingDeselect && from === selected) { clearSelection(); refresh(); }
+		pendingDeselect = false;
 		return true;
 	}
-	match.play(from, target, QUEEN);
+	pendingDeselect = false;
+	if (from !== selected || !legal.some(m => m.to === to)) return false;
+	return attempt(from, to);
+}
+
+function attempt(from, to) {
+	const options = legal.filter(m => m.to === to);
+	if (!options.length) return false;
+	const color = match.state.human;
+	clearSelection();
+	if (options.length > 1 && options[0].promotion) {
+		promoting = true;
+		refresh();
+		view.askPromotion(to, color).then(type => {
+			promoting = false;
+			if (type) match.play(from, to, type);
+			else { view.setPosition(match.state.pos); refresh(); }
+		});
+		return true;
+	}
+	match.play(from, to);
 	return true;
 }
-
-// ── 指针 ──────────────────────────────────────────────────────
-
-const raycaster = new THREE.Raycaster();
-const pointer = new THREE.Vector2();
-let downAt = null;
-
-function pick(event) {
-	pointer.set((event.clientX / innerWidth) * 2 - 1, -(event.clientY / innerHeight) * 2 + 1);
-	raycaster.setFromCamera(pointer, camera);
-	const onPiece = raycaster.intersectObjects(table.meshes, false)[0];
-	let result;
-	if (onPiece) {
-		const sq = table.squareOfMesh(onPiece.object);
-		if (sq >= 0) result = sq;
-	}
-	if (result === undefined) {
-		const onBoard = raycaster.intersectObject(board.field, false)[0];
-		result = onBoard ? worldToSquare(onBoard.point) : -1;
-	}
-	window.__PICK_DEBUG = { x: event.clientX, y: event.clientY, piece: onPiece ? onPiece.object.uuid.slice(0, 6) : null, sq: result, ts: performance.now() };
-	return result;
-}
-
-canvas.addEventListener('pointermove', event => {
-	if (!playing || paused) { board.setHover(-1); return; }
-	board.setHover(pick(event));
-});
-
-canvas.addEventListener('pointerdown', event => {
-	downAt = { x: event.clientX, y: event.clientY };
-});
-
-function clickSquare(sq) {
-	if (!playing || paused || hud.promoting) { window.__CLICK_DEBUG = { sq, reason: 'blocked', playing, paused }; return; }
-	if (sq < 0) { window.__CLICK_DEBUG = { sq, reason: 'miss' }; clearSelection(); return; }
-
-	if (selected >= 0 && attempt(sq)) return;
-
-	const piece = match.state.pos.board[sq];
-	window.__CLICK_DEBUG = { sq, piece, selectedBefore: selected, human: match.state.human, over: Boolean(match.state.over) };
-	if (piece && colorOf(piece) === match.state.human && !match.state.over) {
-		if (sq === selected) clearSelection();
-		else selectSquare(sq);
-	} else {
-		clearSelection();
-	}
-}
-
-canvas.addEventListener('pointerup', event => {
-	if (!playing || paused || !downAt) return;
-	const dragged = Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) > 6;
-	downAt = null;
-	if (dragged) return;
-	clickSquare(pick(event));
-});
-
-// ── 菜单 ─────────────────────────────────────────────────────────
-
-const menu = createMenu({
-	settings,
-	audio,
-	onSetting: applySetting,
-	onAction: act => {
-		if (act === 'play') startGame();
-		else if (act === 'rematch') startGame();
-		else if (act === 'controls') menu.show('controls', { push: true });
-		else if (act === 'settings') menu.show('settings', { push: true });
-		else if (act === 'resume') resume();
-		else if (act === 'undo') { takeBack(); resume(); }
-		else if (act === 'resign') { match.resign(); }
-		else if (act === 'quit') toTitle();
-		else if (act === 'review') review();
-		else if (act === 'close') { if (playing) resume(); else menu.show('title'); }
-	}
-});
-
-function setView(value) {
-	const topdown = value === '2d';
-	document.body.classList.toggle('mode2d', topdown);
-	stage.setTopDown(topdown);
-	board.setFlat(topdown);
-	board.setFlipped(stage.state.flipped);
-	table.setBadgeIcons(topdown);
-	table.setBadges(topdown || settings.badges === 'on');
-	hud.setTool('mode', topdown);
-	hud.setTool('badges', topdown || settings.badges === 'on');
-	// 扁平棋盘点亮时，雪林、灯笼、落雪全部退场——界面风格跟着棋盘走。
-	ground.mesh.visible = !topdown;
-	sky.dome.visible = !topdown;
-	forest.group.visible = !topdown;
-	props.group.visible = !topdown;
-	snowfall.points.visible = topdown ? false : settings.snow !== 'off';
-	if (playing) hud.setHint(topdown ? '二维棋盘 · 点棋子拿起，点格子落子 · V 换回三维' : '拖拽旋转视角 · 点击棋子拿起');
-}
-
-function applySetting(key, value) {
-	if (key === 'view') setView(value);
-	else if (key === 'quality') stage.setQuality(value);
-	else if (key === 'sound') audio.enabled = value === 'on';
-	else if (key === 'hints') { board.setHints(value === 'on'); hud.setTool('hints', value === 'on'); }
-	else if (key === 'badges') { table.setBadges(value === 'on' || settings.view === '2d'); hud.setTool('badges', value === 'on' || settings.view === '2d'); }
-	else if (key === 'snow') snowfall.setDensity(value === 'heavy' ? 1 : value === 'light' ? 0.45 : 0);
-}
-
-stage.onQuality((next, automatic) => {
-	lighting.setQuality(stage.state.cfg);
-	snowfall.setQuality(stage.state.cfg);
-	ground.setQuality(stage.state.cfg);
-	bursts.setQuality(stage.state.cfg);
-	menu.set('quality', next);
-	if (automatic) hud.toast(`画质已自动降到${QUALITY_TEXT[next] || next}，以保持流畅帧率`, 4200);
-});
 
 // ── 流程 ─────────────────────────────────────────────────────────
 
-function startGame() {
-	const human = settings.side === 'b' ? BLACK : WHITE;
-	stage.state.flipped = human === BLACK;
-	board.setFlipped(stage.state.flipped);
+function startGame({ human, level = settings.level, fen = START_FEN }) {
 	playing = true;
-	paused = false;
-	reviewing = false;
-	menu.hide();
-	hud.show();
-	hud.cancelPromotion();
-	stage.setAttract(false);
-	hud.setTool('hints', settings.hints === 'on');
-	hud.setTool('badges', settings.badges === 'on');
-	hud.setTool('sound', settings.sound === 'on');
-	setView(settings.view);
-	match.newGame({ human, level: settings.level });
+	flipped = human === BLACK;
+	view.setFlipped(flipped);
+	shell.close('dlg-new');
+	match.newGame({ human, level, fen });
 }
 
-function pause() {
-	if (!playing || paused) return;
-	paused = true;
-	const move = Math.floor(match.state.history.length / 2) + 1;
-	const side = SIDE_TEXT[match.state.pos.turn];
-	menu.slot('pause-line', `第 ${move} 回合 · ${side}行棋`);
-	menu.show('pause');
-	stage.controls.enabled = settings.view !== '2d';
+function resolveSide(side) {
+	if (side === 'random') return Math.random() < 0.5 ? WHITE : BLACK;
+	return side === 'b' ? BLACK : WHITE;
 }
-
-function resume() {
-	if (!playing) return;
-	paused = false;
-	menu.hide();
-}
-
-function toTitle() {
-	playing = false;
-	paused = false;
-	reviewing = false;
-	clearSelection();
-	hud.hide();
-	stage.setAttract(true);
-	menu.show('title');
-}
-
-function review() {
-	reviewing = true;
-	paused = false;
-	menu.hide();
-	hud.show();
-	stage.setAttract(false);
-	hud.toast('正在研究终局局面 · 按 Esc 离开');
-}
-
-let undoPliesQueued = 0;
-let undoTimer = 0;
 
 function takeBack() {
-	if (!playing) { audio.deny(); return; }
-	clearSelection();
-	if (!table.isIdle()) {
-		// 走子/碎裂动画进行中：立即悔棋会触发重建与旧 tween 回写打架，
-		// 出现"悔棋后棋子还在原位置/多出棋子"。记下这次悔棋（可累加），动画落定后一次性执行。
-		undoPliesQueued += 2;
-		hud.toast('落定后自动悔棋…', 900);
-		if (!undoTimer) undoTimer = setInterval(() => {
-			if (!table.isIdle()) return;
-			clearInterval(undoTimer);
-			undoTimer = 0;
-			const n = undoPliesQueued;
-			undoPliesQueued = 0;
-			doUndo(n);
-		}, 100);
-		return;
-	}
-	doUndo(0);
+	if (!playing) return;
+	reviewPly = null;
+	view.setPosition(match.state.pos);
+	if (promoting) { board2d.cancelPromotion(); shell.close('dlg-promo'); }
+	if (match.undo(1)) shell.toast('已悔棋', 1200);
+	else { audio.deny(); shell.toast('没有可以悔的棋'); }
 }
 
-function doUndo(plies) {
-	const wasOver = Boolean(match.state.over);
-	if (match.undo(plies)) {
-		// 终局后反悔：收起结算屏，接着下。
-		if (wasOver) { paused = false; reviewing = false; menu.hide(); hud.show(); }
-		hud.toast('已悔棋');
-	} else audio.deny();
-}
-
-function endGame(over) {
-	const humanWon = over.winner === match.state.human;
-	audio.end(humanWon);
+function reviewTo(ply) {
+	const s = match.state;
+	if (!s.history.length) return;
+	const next = Math.max(-1, Math.min(s.history.length - 1, ply));
 	clearSelection();
+	reviewPly = next === s.history.length - 1 ? null : next;
+	view.setPosition(currentPos());
 	refresh();
-
-	const title = over.reason === 'checkmate' ? '将杀'
-		: over.reason === 'resignation' ? '认输'
-		: over.reason === 'flag fall' ? '超时判负'
-		: '和棋';
-	menu.slot('result-title', title);
-	menu.slot('result-over', over.winner
-		? `${SIDE_TEXT[over.winner]}赢下这片空地`
-		: `雪林守住了秘密 · ${REASON_TEXT[over.reason] || over.reason}`);
-
-	const tally = match.tally();
-	const stats = document.querySelector('[data-slot="result-stats"]');
-	stats.innerHTML = [
-		['回合', Math.ceil(match.state.history.length / 2)],
-		['子力', tally[WHITE] > 0 ? `象牙 +${tally[WHITE]}` : tally[BLACK] > 0 ? `黑曜 +${tally[BLACK]}` : '持平'],
-		['对手', LEVEL_TEXT[settings.level] || settings.level],
-		['结局', REASON_TEXT[over.reason] || over.reason]
-	].map(([label, value]) => `<div><span>${label}</span><b>${value}</b></div>`).join('');
-
-	setTimeout(() => menu.show('result'), 900);
 }
 
-// ── 按键与工具 ─────────────────────────────────────────────────
+function flip() {
+	flipped = !flipped;
+	view.setFlipped(flipped);
+	refresh();
+}
 
-function handleTool(tool) {
-	if (tool === 'hints') { settings.hints = settings.hints === 'on' ? 'off' : 'on'; menu.set('hints', settings.hints); applySetting('hints', settings.hints); }
-	else if (tool === 'badges') { settings.badges = settings.badges === 'on' ? 'off' : 'on'; menu.set('badges', settings.badges); applySetting('badges', settings.badges); }
-	else if (tool === 'sound') { settings.sound = settings.sound === 'on' ? 'off' : 'on'; menu.set('sound', settings.sound); applySetting('sound', settings.sound); hud.setTool('sound', settings.sound === 'on'); }
-	else if (tool === 'mode') { settings.view = settings.view === '2d' ? '3d' : '2d'; menu.set('view', settings.view); applySetting('view', settings.view); }
-	else if (tool === 'flip') { const fl = stage.flip(); board.setFlipped(fl); hud.toast(fl ? '棋盘已翻转 · 黑曜近手' : '棋盘已翻转 · 象牙近手'); }
-	else if (tool === 'view') { hud.toast(`视角 · ${stage.cycleView()}`); }
-	else if (tool === 'full') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); }
-	else if (tool === 'pause') pause();
-	else if (tool === 'undo') takeBack();
-	else if (tool === 'copy') {
-		navigator.clipboard?.writeText(match.pgn()).then(
-			() => hud.toast('棋谱已复制'),
-			() => hud.toast('剪贴板不可用')
-		);
-	}
-	else if (tool === 'log') {
-		const log = (window.__CHESS_LOG || []).join('\n');
-		navigator.clipboard?.writeText(log).then(
-			() => hud.toast(`诊断日志已复制（${log.split('\n').filter(Boolean).length} 条）`),
-			() => hud.toast('剪贴板不可用，日志在 window.__CHESS_LOG')
-		);
+function copyText(text, done) {
+	const fallback = () => {
+		const area = Object.assign(document.createElement('textarea'), { value: text });
+		document.body.append(area);
+		area.select();
+		const ok = document.execCommand?.('copy');
+		area.remove();
+		shell.toast(ok ? done : '复制失败，请手动选择复制');
+	};
+	if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(() => shell.toast(done), fallback);
+	else fallback();
+}
+
+function setView(next) {
+	const target = next === '3d' ? view3d : view2d;
+	if (target === view) return;
+	const apply = () => {
+		board2d.cancelPromotion();
+		view.hide();
+		body.dataset.view = next;
+		view = target;
+		view.show(currentPos());
+		view.setFlipped(flipped);
+		refresh();
+	};
+	// 首次搭建 3D 场景要一两秒：先让提示画出来再建。其余切换立即生效。
+	if (next === '3d' && !view3d.built) { shell.toast('正在搭建 3D 雪林…', 1800); setTimeout(apply, 60); }
+	else apply();
+}
+
+// ── 动作与设置 ───────────────────────────────────────────────────
+
+function handleAction(act) {
+	switch (act) {
+		case 'new': shell.open('dlg-new'); break;
+		case 'start': startGame({ human: resolveSide(settings.side) }); break;
+		case 'settings': shell.open('dlg-settings'); break;
+		case 'setup': shell.close('dlg-new'); editor.open(playing ? match.state.pos : null); break;
+		case 'photo': shell.close('dlg-new'); photo.open(); break;
+		case 'rematch': startGame({ human: match.state.human, level: match.state.level, fen: match.state.startFen }); break;
+		case 'takeback':
+		case 'undo': takeBack(); break;
+		case 'flip': flip(); break;
+		case 'hints': changeSetting('hints', settings.hints === 'on' ? 'off' : 'on'); break;
+		case 'copy': copyText(match.pgn(), '棋谱已复制（PGN）'); break;
+		case 'resign':
+			if (!playing || match.state.over) break;
+			if (Date.now() - resignArmed < 3000) { resignArmed = 0; match.resign(); }
+			else { resignArmed = Date.now(); shell.toast('再按一次「认输」确认', 3000); }
+			break;
+		case 'review-prev': reviewTo((reviewPly ?? match.state.history.length - 1) - 1); break;
+		case 'review-next': reviewTo((reviewPly ?? match.state.history.length - 1) + 1); break;
+		case 'review-exit': reviewTo(match.state.history.length - 1); break;
 	}
 }
+
+function changeSetting(key, value) {
+	if (settings[key] === value) return;
+	settings[key] = value;
+	saveSettings(settings);
+	applySetting(key);
+	shell.paintSettings(settings);
+}
+
+function applySetting(key) {
+	const v = settings[key];
+	if (key === 'board' || key === 'pieces' || key === 'coords') body.dataset[key] = v;
+	else if (key === 'sound') audio.enabled = v === 'on';
+	else if (key === 'hints') refresh();
+	else if (key === 'view') setView(v);
+	else if (key === 'quality') view3d.setQuality(v);
+	else if (key === 'snow') view3d.setSnow(v);
+	else if (key === 'badges') view3d.setBadges(v === 'on');
+}
+
+// ── 键盘 ─────────────────────────────────────────────────────────
 
 addEventListener('keydown', event => {
-	if (menu.current) return;
+	if (shell.anyDialogOpen() || editor.isOpen || photo.isOpen) return;
+	if (event.target.closest?.('input, textarea')) return;
+	if (event.metaKey || event.ctrlKey || event.altKey) return;
 	const key = event.key.toLowerCase();
-	if (key === 'escape') { if (reviewing) toTitle(); else pause(); }
-	else if (key === '1') stage.moveTo('seat');
-	else if (key === '2') stage.moveTo('high');
-	else if (key === '3') stage.moveTo('over');
-	else if (key === 'f') handleTool('flip');
-	else if (key === 'u') handleTool('undo');
-	else if (key === 'h') handleTool('hints');
-	else if (key === 'm') handleTool('badges');
-	else if (key === 'v') handleTool('mode');
+	if (key === 'f') flip();
+	else if (key === 'u') takeBack();
+	else if (key === 'h') handleAction('hints');
+	else if (key === 'v') changeSetting('view', settings.view === '2d' ? '3d' : '2d');
+	else if (key === 'arrowleft') { handleAction('review-prev'); event.preventDefault(); }
+	else if (key === 'arrowright') { handleAction('review-next'); event.preventDefault(); }
+	else if (key === 'escape') { clearSelection(); refresh(); }
+	else if (view === view3d && ['1', '2', '3'].includes(key)) view3d.moveTo({ 1: 'seat', 2: 'high', 3: 'over' }[key]);
 });
 
-// ── 循环 ─────────────────────────────────────────────────────────
+// ── 摆棋与拍照 ────────────────────────────────────────────────────
 
-let clockPaint = 0;
+const editor = createEditor({
+	settings,
+	onSetting: changeSetting,
+	onPhoto: () => photo.open({ fromEditor: true }),
+	onPlay: ({ fen, human }) => startGame({ human, fen }),
+	toast: text => shell.toast(text)
+});
 
-stage.onUpdate((dt, time) => {
-	lighting.update(dt, time);
-	sky.update(dt, time);
-	ground.update(dt, time);
-	forest.update(dt, time);
-	snowfall.update(dt, time, camera);
-	props.update(dt, time);
-	board.update(dt, time);
-	table.update(dt, time);
-	bursts.update(dt, time);
-
-	if (playing && !paused && !reviewing && !match.state.over) {
-		match.tick(dt);
-		clockPaint += dt;
-		if (clockPaint > 0.2) {
-			clockPaint = 0;
-			hud.setClocks(match.state.clocks[WHITE], match.state.clocks[BLACK]);
-		}
-	}
+const photo = createPhoto({
+	recognizer: null,
+	toast: text => shell.toast(text),
+	// 识别结果交给摆棋编辑器核对。
+	onResult: result => editor.open(null, result)
 });
 
 // ── 启动 ─────────────────────────────────────────────────────────
 
-table.sync(match.state.pos);
-setView(settings.view);
-menu.show('title');
+for (const key of ['board', 'pieces', 'coords']) body.dataset[key] = settings[key];
+shell.paintSettings(settings);
 
-// 标签页可见时等两帧，不可见时走定时器——无论哪条路，
-// 幕布都会落下。
-let curtain = false;
-const raise = () => {
-	if (curtain) return;
-	curtain = true;
+const saved = loadGame();
+if (saved) {
+	playing = true;
+	flipped = Boolean(saved.flipped);
+	view.setFlipped(flipped);
+	match.restore(saved);
+	if (match.state.history.length) shell.toast('已恢复上一局', 1800);
+} else {
+	view.setPosition(match.state.pos);
+	refresh();
+	shell.open('dlg-new');
+}
+if (settings.view === '3d') setView('3d');
+
+const boot = document.getElementById('boot');
+requestAnimationFrame(() => {
 	boot.classList.add('gone');
-	setTimeout(() => boot.remove(), 800);
-};
-requestAnimationFrame(() => requestAnimationFrame(raise));
-setTimeout(raise, 1200);
+	setTimeout(() => boot.remove(), 400);
+});

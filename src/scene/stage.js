@@ -195,16 +195,20 @@ export function createStage(canvas, quality = 'high') {
 		post.render(dt);
 	}
 
-	renderer.setAnimationLoop(() => {
+	const loop = () => {
 		const now = performance.now();
 		frame(Math.min((now - last) / 1000, 0.05));
 		measure(now - last);
 		last = now;
-	});
+	};
+	renderer.setAnimationLoop(loop);
 
 	return {
 		renderer, scene, camera, controls, post, state,
 		onUpdate: fn => updates.push(fn),
+		// 切到 2D 时整条渲染循环停掉，手机上不再白白耗电发热。
+		stop() { renderer.setAnimationLoop(null); },
+		start() { last = performance.now(); state.frames = []; resize(); renderer.setAnimationLoop(loop); },
 		onQuality: fn => listeners.quality.push(fn),
 		setQuality,
 		moveTo,

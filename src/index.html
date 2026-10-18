@@ -3,177 +3,299 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>3D国际象棋对弈</title>
-<meta name="description" content="在雪林深处的冰封石板上进行的一场国际象棋对局。">
+<meta name="theme-color" content="#f3f1ed" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16171a" media="(prefers-color-scheme: dark)">
+<title>霜林弃兵 · 国际象棋</title>
+<meta name="description" content="和电脑下国际象棋：清爽的 2D 棋盘、可选的 3D 雪林场景，还能拍一张棋图复刻局面接着下。">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23070c15'/%3E%3Cpath d='M16 5c-3 0-5 2-5 4l-2 3 2 1-3 4h4l-1 5h10l-1-7c0-6-1-10-4-10z' fill='%23eef4fb'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="./ui/ui.css">
 </head>
-<body>
+<body data-view="2d" data-board="green" data-pieces="celtic" data-coords="on">
 
-<canvas id="stage"></canvas>
+<!-- 图标集：线性图标，颜色随文字 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+		<symbol id="i-flip" viewBox="0 0 24 24"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m21 16-4 4-4-4"/></symbol>
+		<symbol id="i-hint" viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1.1 2.2h5c.1-1 .5-1.7 1.1-2.2A6 6 0 0 0 12 3z"/></symbol>
+		<symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></symbol>
+		<symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></symbol>
+		<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+		<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+		<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M3.5 12h17"/><path d="M12 3.5v17"/><path d="M3.5 7.75h4.25V3.5M12 12h4.25v4.25H12zM16.25 3.5v4.25h4.25M7.75 20.5v-4.25H3.5"/></symbol>
+		<symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></symbol>
+		<symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+		<symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+		<symbol id="i-last" viewBox="0 0 24 24"><path d="m7 18 6-6-6-6"/><path d="M17 6v12"/></symbol>
+		<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12"/><path d="M18 6 6 18"/></symbol>
+		<symbol id="i-cube" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5"/><path d="M12 12v9"/></symbol>
+		<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></symbol>
+		<symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></symbol>
+		<symbol id="i-hand" viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11"/><path d="M11 10.5v-6a1.5 1.5 0 0 1 3 0v6"/><path d="M14 10.5V6a1.5 1.5 0 0 1 3 0v8a7 7 0 0 1-7 7h-.5a6 6 0 0 1-4.8-2.4L3 14.5a1.6 1.6 0 0 1 2.4-2L8 15"/></symbol>
+	</defs>
+</svg>
 
-<main id="ui">
+<canvas id="stage" hidden></canvas>
 
-	<!-- ── 标题屏 ─────────────────────────────────────────────── -->
-	<section class="screen" data-screen="title">
-		<div class="rail">
-			<p class="overline">冬季巡回赛 · 第一台</p>
-			<h1 class="title">霜林<b>弃兵</b></h1>
-			<nav class="menu" data-menu="title">
-				<button class="mi" data-act="play"><i></i><span>进入空地</span></button>
-				<button class="mi val" data-act="side"><i></i><span>先后手</span><b class="v">人先 · 象牙</b></button>
-				<button class="mi val" data-act="level"><i></i><span>对手</span><b class="v">棋社</b></button>
-				<button class="mi" data-act="controls"><i></i><span>操作</span></button>
-				<button class="mi" data-act="settings"><i></i><span>设置</span></button>
+<div id="app">
+
+	<header class="topbar">
+		<div class="brand"><span class="brand-mark pc wN" aria-hidden="true"></span><b>霜林弃兵</b></div>
+		<nav class="top-actions">
+			<button class="tbtn" data-act="new"><svg><use href="#i-plus"/></svg><span>新对局</span></button>
+			<button class="tbtn" data-act="setup"><svg><use href="#i-grid"/></svg><span>摆棋</span></button>
+			<button class="tbtn" data-act="photo"><svg><use href="#i-camera"/></svg><span>拍照复刻</span></button>
+			<button class="tbtn icon" data-act="settings" aria-label="设置" title="设置"><svg><use href="#i-gear"/></svg></button>
+		</nav>
+	</header>
+
+	<main class="game">
+		<section class="board-col">
+			<div class="player" data-slot="player-top">
+				<span class="avatar pc"></span>
+				<div class="pinfo"><b class="pname"></b><span class="psub"></span></div>
+				<span class="captures"></span>
+				<span class="think" aria-hidden="true"><i></i><i></i><i></i></span>
+			</div>
+			<div class="board-wrap">
+				<div id="board2d"></div>
+			</div>
+			<div class="player" data-slot="player-bottom">
+				<span class="avatar pc"></span>
+				<div class="pinfo"><b class="pname"></b><span class="psub"></span></div>
+				<span class="captures"></span>
+				<span class="think" aria-hidden="true"><i></i><i></i><i></i></span>
+			</div>
+		</section>
+
+		<aside class="side">
+			<div class="card status-card">
+				<p class="status" data-slot="status">准备开局</p>
+				<div class="eval" title="局势评估（引擎视角）">
+					<div class="eval-rail"><i data-slot="eval-fill"></i></div>
+					<span data-slot="eval-text">均势</span>
+				</div>
+			</div>
+
+			<div class="card result-card" data-slot="result" hidden>
+				<p class="result-title" data-slot="result-title"></p>
+				<p class="result-sub" data-slot="result-sub"></p>
+				<div class="row">
+					<button class="btn primary" data-act="rematch">再来一局</button>
+					<button class="btn" data-act="takeback">悔棋接着下</button>
+				</div>
+			</div>
+
+			<div class="card moves-card">
+				<div class="review-bar" data-slot="review" hidden>
+					<span data-slot="review-text"></span>
+					<span class="row">
+						<button class="ibtn" data-act="review-prev" aria-label="上一步"><svg><use href="#i-left"/></svg></button>
+						<button class="ibtn" data-act="review-next" aria-label="下一步"><svg><use href="#i-right"/></svg></button>
+						<button class="ibtn" data-act="review-exit" aria-label="回到当前局面" title="回到当前"><svg><use href="#i-last"/></svg></button>
+					</span>
+				</div>
+				<ol class="moves" data-slot="moves"></ol>
+				<p class="moves-empty" data-slot="moves-empty">还没有着法。<br>点一下棋子开始。</p>
+			</div>
+
+			<nav class="controls">
+				<button class="cbtn" data-act="undo"><svg><use href="#i-undo"/></svg><span>悔棋</span></button>
+				<button class="cbtn" data-act="flip"><svg><use href="#i-flip"/></svg><span>翻转</span></button>
+				<button class="cbtn" data-act="hints"><svg><use href="#i-hint"/></svg><span>提示</span></button>
+				<button class="cbtn" data-act="copy"><svg><use href="#i-copy"/></svg><span>棋谱</span></button>
+				<button class="cbtn" data-act="resign"><svg><use href="#i-flag"/></svg><span>认输</span></button>
 			</nav>
-			<p class="foot">↑↓ 选择 · Enter 确认 · ←→ 更改</p>
-		</div>
-	</section>
-
-	<!-- ── 操作 ──────────────────────────────────────────── -->
-	<section class="screen" data-screen="controls">
-		<div class="rail">
-			<p class="overline">速查</p>
-			<h2 class="subtitle">操作</h2>
-			<dl class="deflist">
-				<div><dt>拖拽</dt><dd>环绕空地旋转视角</dd></div>
-				<div><dt>滚轮</dt><dd>拉近 / 推远</dd></div>
-				<div><dt>点击棋子</dt><dd>拿起棋子，显示每个合法落点</dd></div>
-				<div><dt>点击格子</dt><dd>落子</dd></div>
-				<div><dt>1 2 3</dt><dd>视角：对坐 · 高位 · 俯瞰</dd></div>
-				<div><dt>F</dt><dd>翻转棋盘</dd></div>
-				<div><dt>U</dt><dd>悔棋</dd></div>
-				<div><dt>H</dt><dd>开关走子提示</dd></div>
-				<div><dt>V</dt><dd>切换二维 / 三维棋盘</dd></div>
-				<div><dt>Esc</dt><dd>暂停</dd></div>
-			</dl>
-			<nav class="menu" data-menu="controls">
-				<button class="mi" data-act="back"><i></i><span>返回</span></button>
-			</nav>
-		</div>
-	</section>
-
-	<!-- ── 设置 ──────────────────────────────────────────── -->
-	<section class="screen" data-screen="settings">
-		<div class="rail">
-			<p class="overline">调整</p>
-			<h2 class="subtitle">设置</h2>
-			<nav class="menu" data-menu="settings">
-				<button class="mi val" data-act="view"><i></i><span>视图</span><b class="v">三维</b></button>
-				<button class="mi val" data-act="quality"><i></i><span>画质</span><b class="v">高</b></button>
-				<button class="mi val" data-act="snow"><i></i><span>降雪</span><b class="v">大雪</b></button>
-				<button class="mi val" data-act="sound"><i></i><span>声音</span><b class="v">开</b></button>
-				<button class="mi val" data-act="hints"><i></i><span>走子提示</span><b class="v">开</b></button>
-				<button class="mi val" data-act="badges"><i></i><span>棋子标记</span><b class="v">关</b></button>
-				<button class="mi" data-act="back"><i></i><span>返回</span></button>
-			</nav>
-			<p class="foot">←→ 更改 · Enter 确认</p>
-		</div>
-	</section>
-
-	<!-- ── 暂停 ─────────────────────────────────────────────── -->
-	<section class="screen" data-screen="pause">
-		<div class="rail">
-			<p class="overline" data-slot="pause-line">第 1 回合 · 象牙行棋</p>
-			<h2 class="subtitle">已暂停</h2>
-			<nav class="menu" data-menu="pause">
-				<button class="mi" data-act="resume"><i></i><span>继续</span></button>
-				<button class="mi" data-act="undo"><i></i><span>悔棋</span></button>
-				<button class="mi" data-act="settings"><i></i><span>设置</span></button>
-				<button class="mi" data-act="controls"><i></i><span>操作</span></button>
-				<button class="mi" data-act="resign"><i></i><span>认输</span></button>
-				<button class="mi" data-act="quit"><i></i><span>离开空地</span></button>
-			</nav>
-		</div>
-	</section>
-
-	<!-- ── 结算 ────────────────────────────────────────────── -->
-	<section class="screen" data-screen="result">
-		<div class="rail">
-			<p class="overline" data-slot="result-over">对局结束</p>
-			<h2 class="title" data-slot="result-title">将杀</h2>
-			<div class="stats" data-slot="result-stats"></div>
-			<nav class="menu" data-menu="result">
-				<button class="mi" data-act="undo"><i></i><span>悔棋接着下</span></button>
-				<button class="mi" data-act="rematch"><i></i><span>再来一局</span></button>
-				<button class="mi" data-act="review"><i></i><span>复盘</span></button>
-				<button class="mi" data-act="quit"><i></i><span>离开空地</span></button>
-			</nav>
-		</div>
-	</section>
-
-</main>
-
-<!-- ── 局内抬头显示 ────────────────────────────────── -->
-<div id="hud" hidden>
-
-	<div class="hud-turn">
-		<span class="dot" data-slot="turn-dot"></span>
-		<span data-slot="turn-text">象牙行棋</span>
-	</div>
-
-	<div class="hud-clocks">
-		<div class="side" data-side="w">
-			<span class="tag">象牙</span>
-			<span class="mat" data-slot="mat-w"></span>
-			<span class="clock" data-slot="clock-w">10:00</span>
-		</div>
-		<div class="side" data-side="b">
-			<span class="tag">黑曜</span>
-			<span class="mat" data-slot="mat-b"></span>
-			<span class="clock" data-slot="clock-b">10:00</span>
-		</div>
-	</div>
-
-	<div class="hud-tools">
-		<button class="tb" data-tool="hints" title="走子提示" aria-label="开关走子提示"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="2.6" width="10.8" height="10.8"/><circle cx="8" cy="8" r="2.1" fill="currentColor" stroke="none"/></svg></button>
-		<button class="tb" data-tool="badges" title="棋子标记" aria-label="开关棋子标记"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.2 13 4.1v4.4c0 2.6-2.2 4.4-5 5.4-2.8-1-5-2.8-5-5.4V4.1z"/></svg></button>
-		<button class="tb" data-tool="flip" title="翻转棋盘" aria-label="翻转棋盘"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 5.8 8 2.4l3.4 3.4M4.6 10.2 8 13.6l3.4-3.4"/></svg></button>
-		<button class="tb" data-tool="mode" title="二维棋盘" aria-label="切换二维棋盘"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="2.6" width="10.8" height="10.8"/><path d="M2.6 8h10.8M8 2.6v10.8"/></svg></button>
-		<button class="tb" data-tool="view" title="相机视角" aria-label="切换相机视角"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 5.2 8 2.4l5.4 2.8v5.6L8 13.6l-5.4-2.8z"/><path d="M2.6 5.2 8 8v5.6M13.4 5.2 8 8"/></svg></button>
-		<button class="tb" data-tool="sound" title="声音" aria-label="开关声音"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 6.1h2.4L8.6 3v10L5.2 9.9H2.8z"/><path d="M11.2 5.7a3.3 3.3 0 0 1 0 4.6"/></svg></button>
-		<button class="tb" data-tool="log" title="诊断日志" aria-label="复制诊断日志"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="2.4" width="10" height="11.2" rx="1.2"/><path d="M5.6 5.6h4.8M5.6 8h4.8M5.6 10.4h3"/></svg></button>
-		<button class="tb" data-tool="full" title="全屏" aria-label="切换全屏"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 6V2.6H6M10 2.6h3.4V6M13.4 10v3.4H10M6 13.4H2.6V10"/></svg></button>
-		<button class="tb" data-tool="undo" title="悔棋" aria-label="悔棋"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a5 5 0 1 1 1.7 3.8"/><path d="M3 4.6V8h3.4"/></svg></button>
-		<button class="tb" data-tool="pause" title="暂停" aria-label="暂停游戏"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M6 3.2v9.6M10 3.2v9.6"/></svg></button>
-	</div>
-
-	<div class="hud-eval">
-		<div class="eval-head"><span>局势</span><b data-slot="eval-text">均势</b></div>
-		<div class="eval-rail"><i data-slot="eval-fill"></i><u data-slot="eval-mid"></u></div>
-	</div>
-
-	<div class="hud-ledger">
-		<div class="ledger-head">
-			<span>棋谱</span>
-			<span class="ledger-tools">
-				<button class="mini" data-tool="copy" title="复制棋谱" aria-label="复制棋谱"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="5.6" y="5.6" width="7.8" height="7.8" rx="1"/><path d="M10.4 3.6h-7a1 1 0 0 0-1 1v7"/></svg></button>
-				<button class="mini" data-tool="undo" title="悔棋" aria-label="悔棋"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a5 5 0 1 1 1.7 3.8"/><path d="M3 4.6V8h3.4"/></svg></button>
-			</span>
-		</div>
-		<ol class="ledger-body" data-slot="ledger"></ol>
-		<p class="ledger-empty" data-slot="ledger-empty">雪林无声。<br>棋谱尚空。</p>
-	</div>
-
-	<p class="hud-hint" data-slot="hint">拖拽旋转视角 · 点击棋子拿起</p>
-	<div class="hud-toast" data-slot="toast"></div>
-
-	<div class="promo" data-slot="promo" hidden>
-		<p class="overline">兵抵达底线</p>
-		<div class="promo-row">
-			<button data-piece="5">后</button>
-			<button data-piece="4">车</button>
-			<button data-piece="3">象</button>
-			<button data-piece="2">马</button>
-		</div>
-	</div>
-
+		</aside>
+	</main>
 </div>
 
-<div id="boot">
-	<p class="overline">霜林博弈</p>
-	<p class="boot-msg" data-slot="boot">正在扫开积雪…</p>
-</div>
+<!-- ── 新对局 ─────────────────────────────────────── -->
+<dialog class="sheet" id="dlg-new" aria-labelledby="dlg-new-title">
+	<form method="dialog">
+		<header class="sheet-head"><h2 id="dlg-new-title">新对局</h2><button class="ibtn" value="cancel" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
+		<div class="field">
+			<label>我执</label>
+			<div class="seg" data-setting="side">
+				<button type="button" data-value="w">白方 · 先走</button>
+				<button type="button" data-value="b">黑方 · 后走</button>
+				<button type="button" data-value="random">随机</button>
+			</div>
+		</div>
+		<div class="field">
+			<label>对手强度</label>
+			<div class="seg" data-setting="level">
+				<button type="button" data-value="novice">新手</button>
+				<button type="button" data-value="club">棋社</button>
+				<button type="button" data-value="expert">专家</button>
+				<button type="button" data-value="master">大师</button>
+			</div>
+		</div>
+		<button class="btn primary wide" type="button" data-act="start" autofocus>开始对局</button>
+		<div class="sheet-alt">
+			<span>想从某个局面接着下？</span>
+			<button class="link" type="button" data-act="setup"><svg><use href="#i-grid"/></svg>摆棋开局</button>
+			<button class="link" type="button" data-act="photo"><svg><use href="#i-camera"/></svg>拍照复刻</button>
+		</div>
+	</form>
+</dialog>
+
+<!-- ── 设置 ───────────────────────────────────────── -->
+<dialog class="sheet" id="dlg-settings" aria-labelledby="dlg-settings-title">
+	<form method="dialog">
+		<header class="sheet-head"><h2 id="dlg-settings-title">设置</h2><button class="ibtn" value="cancel" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
+		<div class="field">
+			<label>棋盘</label>
+			<div class="seg swatches" data-setting="board">
+				<button type="button" data-value="green"><i class="swatch" data-board="green"></i>绿白</button>
+				<button type="button" data-value="brown"><i class="swatch" data-board="brown"></i>木纹</button>
+				<button type="button" data-value="blue"><i class="swatch" data-board="blue"></i>蓝灰</button>
+			</div>
+		</div>
+		<div class="field">
+			<label>棋子</label>
+			<div class="seg pieces" data-setting="pieces">
+				<button type="button" data-value="celtic"><span class="pp" data-pieces="celtic"><i class="pc wN"></i><i class="pc bQ"></i></span>立体</button>
+				<button type="button" data-value="chessnut"><span class="pp" data-pieces="chessnut"><i class="pc wN"></i><i class="pc bQ"></i></span>经典</button>
+				<button type="button" data-value="fantasy"><span class="pp" data-pieces="fantasy"><i class="pc wN"></i><i class="pc bQ"></i></span>华丽</button>
+			</div>
+		</div>
+		<div class="field two">
+			<div><label>坐标</label><div class="seg" data-setting="coords"><button type="button" data-value="on">显示</button><button type="button" data-value="off">隐藏</button></div></div>
+			<div><label>走子提示</label><div class="seg" data-setting="hints"><button type="button" data-value="on">开</button><button type="button" data-value="off">关</button></div></div>
+		</div>
+		<div class="field two">
+			<div><label>声音</label><div class="seg" data-setting="sound"><button type="button" data-value="on">开</button><button type="button" data-value="off">关</button></div></div>
+			<div><label>视图</label><div class="seg" data-setting="view"><button type="button" data-value="2d">2D</button><button type="button" data-value="3d">3D 雪林</button></div></div>
+		</div>
+		<div class="only3d">
+			<div class="field two">
+				<div><label>画质</label><div class="seg" data-setting="quality"><button type="button" data-value="ultra">极致</button><button type="button" data-value="high">高</button><button type="button" data-value="low">低</button></div></div>
+				<div><label>降雪</label><div class="seg" data-setting="snow"><button type="button" data-value="heavy">大雪</button><button type="button" data-value="light">小雪</button><button type="button" data-value="off">关</button></div></div>
+			</div>
+			<div class="field">
+				<label>3D 棋子标记</label>
+				<div class="seg" data-setting="badges"><button type="button" data-value="off">关</button><button type="button" data-value="on">开</button></div>
+			</div>
+			<p class="hint3d">3D 视角：拖拽旋转 · 滚轮缩放 · 键盘 1/2/3 切换机位</p>
+		</div>
+		<p class="keys">快捷键：F 翻转 · U 悔棋 · H 提示 · V 切换 2D/3D · ← → 查看棋谱</p>
+	</form>
+</dialog>
+
+<!-- ── 3D 视图的升变选择（2D 视图在棋盘上直接选） ─────────────── -->
+<dialog class="sheet small" id="dlg-promo" aria-label="兵升变">
+	<form method="dialog">
+		<header class="sheet-head"><h2>兵升变为</h2></header>
+		<div class="promo-row" data-slot="promo-row"></div>
+	</form>
+</dialog>
+
+<!-- ── 摆棋编辑器 ─────────────────────────────────── -->
+<section class="screen" id="editor" hidden aria-label="摆棋">
+	<header class="topbar">
+		<div class="brand"><button class="ibtn" data-ed="close" aria-label="返回"><svg><use href="#i-left"/></svg></button><b>摆棋</b></div>
+		<nav class="top-actions">
+			<button class="tbtn" data-ed="photo"><svg><use href="#i-camera"/></svg><span>拍照/导入图片</span></button>
+		</nav>
+	</header>
+	<div class="editor-body">
+		<div class="editor-board">
+			<div class="palette" data-slot="palette-b"></div>
+			<div class="board-wrap"><div id="board-edit"></div></div>
+			<div class="palette" data-slot="palette-w"></div>
+			<p class="ed-tip" data-slot="ed-tip">选一个棋子后点格子放置；拖动棋子移动，拖出棋盘删除。</p>
+		</div>
+		<div class="editor-side">
+			<div class="card">
+				<div class="field">
+					<label>轮到</label>
+					<div class="seg" data-ed-set="turn"><button type="button" data-value="w">白方走</button><button type="button" data-value="b">黑方走</button></div>
+				</div>
+				<div class="field">
+					<label>易位权</label>
+					<div class="checks" data-slot="castling">
+						<label><input type="checkbox" value="K">白 O-O</label>
+						<label><input type="checkbox" value="Q">白 O-O-O</label>
+						<label><input type="checkbox" value="k">黑 O-O</label>
+						<label><input type="checkbox" value="q">黑 O-O-O</label>
+					</div>
+				</div>
+				<div class="row wrap">
+					<button class="btn" data-ed="start-pos">初始局面</button>
+					<button class="btn" data-ed="clear">清空</button>
+					<button class="btn" data-ed="flip"><svg><use href="#i-flip"/></svg>翻转</button>
+				</div>
+				<div class="field">
+					<label for="ed-fen">FEN</label>
+					<div class="fen-row"><input id="ed-fen" spellcheck="false" autocomplete="off"><button class="ibtn" data-ed="copy-fen" aria-label="复制 FEN" title="复制 FEN"><svg><use href="#i-copy"/></svg></button></div>
+				</div>
+				<ul class="ed-errors" data-slot="ed-errors"></ul>
+			</div>
+			<div class="card">
+				<div class="field">
+					<label>我执</label>
+					<div class="seg" data-ed-set="side"><button type="button" data-value="w">白方</button><button type="button" data-value="b">黑方</button></div>
+				</div>
+				<div class="field">
+					<label>对手强度</label>
+					<div class="seg" data-setting="level">
+						<button type="button" data-value="novice">新手</button>
+						<button type="button" data-value="club">棋社</button>
+						<button type="button" data-value="expert">专家</button>
+						<button type="button" data-value="master">大师</button>
+					</div>
+				</div>
+				<button class="btn primary wide" data-ed="play">从这个局面开始</button>
+			</div>
+		</div>
+	</div>
+</section>
+
+<!-- ── 拍照复刻 ───────────────────────────────────── -->
+<section class="screen" id="photo" hidden aria-label="拍照复刻">
+	<header class="topbar">
+		<div class="brand"><button class="ibtn" data-ph="close" aria-label="返回"><svg><use href="#i-left"/></svg></button><b>拍照复刻</b></div>
+	</header>
+	<div class="photo-body">
+		<div class="photo-pick" data-slot="photo-pick">
+			<div class="drop">
+				<svg class="drop-icon"><use href="#i-image"/></svg>
+				<p><b>拍一张棋图，或导入截图</b></p>
+				<p class="muted">支持手机/电脑上的棋盘截图、对着屏幕拍的照片、书上的平面棋图。<br>全部在本机识别，图片不会上传。</p>
+				<div class="row wrap center">
+					<label class="btn primary"><svg><use href="#i-camera"/></svg>拍照<input type="file" accept="image/*" capture="environment" data-ph="file" hidden></label>
+					<label class="btn"><svg><use href="#i-image"/></svg>选择图片<input type="file" accept="image/*" data-ph="file" hidden></label>
+				</div>
+				<p class="muted small">也可以直接粘贴（Ctrl/⌘ + V）或把图片拖进来。</p>
+			</div>
+		</div>
+		<div class="photo-adjust" data-slot="photo-adjust" hidden>
+			<div class="photo-stage" data-slot="photo-stage">
+				<canvas data-slot="photo-canvas"></canvas>
+				<svg class="quad" data-slot="photo-quad"></svg>
+			</div>
+			<div class="photo-side card">
+				<p class="status" data-slot="photo-status">正在寻找棋盘…</p>
+				<p class="muted">拖动四个角对准棋盘的外边缘，网格应与格子重合。</p>
+				<div class="field">
+					<label>图中视角</label>
+					<div class="seg" data-ph-set="orient"><button type="button" data-value="auto">自动</button><button type="button" data-value="w">白方在下</button><button type="button" data-value="b">黑方在下</button></div>
+				</div>
+				<div class="row wrap">
+					<button class="btn" data-ph="redetect">重新定位</button>
+					<button class="btn" data-ph="again">换一张</button>
+				</div>
+				<button class="btn primary wide" data-ph="read">识别局面</button>
+			</div>
+		</div>
+	</div>
+</section>
+
+<div class="toast" data-slot="toast" role="status" aria-live="polite"></div>
+
+<div id="boot"><span class="boot-mark pc wN"></span></div>
+
 <!-- build:script（构建时替换为内联打包脚本） -->
 <script type="importmap">
 {
