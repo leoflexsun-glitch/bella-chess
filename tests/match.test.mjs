@@ -137,3 +137,21 @@ test('上一局未返回的提示在开新局后作废', async () => {
 	globalThis.__lastWorker?.onmessage?.({ data: { type: 'result', id: hintMsg.id, from: 'e2', to: 'e4' } });
 	assert.equal(result, 'pending');
 });
+
+test('托管环境禁止 worker 时退回主线程计算，电脑照样走棋', async () => {
+	const Saved = globalThis.Worker;
+	globalThis.Worker = class { constructor() { throw new Error('CSP: worker-src blocked'); } };
+	try {
+		const m = createMatch();
+		let moved = null;
+		const done = new Promise(resolve => {
+			const timer = setInterval(() => { if (m.state.history.length) { clearInterval(timer); moved = m.state.history[0]; resolve(); } }, 50);
+		});
+		m.newGame({ human: BLACK, level: 'novice' });
+		await done;
+		assert.equal(moved.mover, WHITE);
+		assert.equal(m.state.pos.turn, BLACK);
+	} finally {
+		globalThis.Worker = Saved;
+	}
+});

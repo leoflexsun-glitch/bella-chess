@@ -6,6 +6,7 @@ import {
 import { normalize } from '../chess/setup.js';
 import { balance } from '../chess/material.js';
 import { evaluate } from '../chess/ai.js';
+import { runSearch } from '../chess/searcher.js';
 
 // 搜索常常二十毫秒就回了开局着法，读起来像对手压着你走。
 // 每个等级都会把手按在棋子上等一会儿：[下限, 随机区间]，单位毫秒。
@@ -22,14 +23,40 @@ const LETTER_PROMO = { n: 2, b: 3, r: 4, q: 5 };
 const positionKey = pos => toFen(pos).split(' ').slice(0, 4).join(' ');
 export const uciOf = move => squareName(move.from) + squareName(move.to) + (move.promotion ? PROMO_LETTER[move.promotion] : '');
 
+// 搜索引擎：优先放进 worker（主线程不卡）。托管环境若禁止 worker（CSP、沙箱 iframe），
+// 构造时抛错或稍后报 error，都退回主线程计算——对手照样会走棋，只是思考时界面会顿一下。
+function createEngine(onResult) {
+	let worker = null;
+	let pending = null;
+	const inline = data => setTimeout(() => onResult(runSearch(data)), 30);
+	try {
+		worker = typeof __INLINE_WORKER__ === 'string'
+			// 单文件部署：worker 代码在打包时内联成字符串，Blob 化使用。
+			? new Worker(URL.createObjectURL(new Blob([__INLINE_WORKER__], { type: 'application/javascript' })))
+			// 多文件开发环境。
+			: new Worker(new URL('../chess/worker.js', import.meta.url), { type: 'module' });
+		worker.onmessage = ({ data }) => { pending = null; onResult(data); };
+		worker.onerror = () => {
+			worker = null;
+			if (pending) inline(pending);
+			pending = null;
+		};
+	} catch {
+		worker = null;
+	}
+	return {
+		post(data) {
+			if (!worker) { inline(data); return; }
+			pending = data;
+			worker.postMessage(data);
+		},
+		terminate() { worker?.terminate(); },
+		get inWorker() { return Boolean(worker); }
+	};
+}
+
 export function createMatch(hooks = {}) {
-	// 单文件部署：worker 代码在打包时内联成字符串，Blob 化使用；多文件开发环境回退到原路径。
-	const worker = (() => {
-		if (typeof __INLINE_WORKER__ === 'string') {
-			return new Worker(URL.createObjectURL(new Blob([__INLINE_WORKER__], { type: 'application/javascript' })));
-		}
-		return new Worker(new URL('../chess/worker.js', import.meta.url), { type: 'module' });
-	})();
+	const worker = createEngine(data => onEngine(data));
 	let requestId = 0;
 
 	const state = {
@@ -50,7 +77,7 @@ export function createMatch(hooks = {}) {
 	let paceTimer = 0;
 	let hint = null;   // { id, fen, done }：进行中的"提示一步"请求
 
-	worker.onmessage = ({ data }) => {
+	function onEngine(data) {
 		if (hint && data.id === hint.id) {
 			const { fen, done } = hint;
 			hint = null;
@@ -78,7 +105,7 @@ export function createMatch(hooks = {}) {
 		const owed = floor + Math.random() * spread - (performance.now() - askedAt);
 		if (owed > 0) paceTimer = setTimeout(play, owed);
 		else play();
-	};
+	}
 
 	// 净子力分：正数表示该方多子。
 	function tally() {
@@ -154,7 +181,7 @@ export function createMatch(hooks = {}) {
 		state.thinking = true;
 		askedAt = performance.now();
 		hooks.onThink?.(state.pos.turn);
-		worker.postMessage({ type: 'search', id: requestId, fen: toFen(state.pos), level: state.level });
+		worker.post({ type: 'search', id: requestId, fen: toFen(state.pos), level: state.level });
 	}
 
 	// 界面已同步到 state 之后，告诉它轮到谁；轮到电脑就开想。
@@ -191,7 +218,7 @@ export function createMatch(hooks = {}) {
 		suggest(done) {
 			if (state.over || state.thinking || state.pos.turn !== state.human || hint) return false;
 			hint = { id: -(++requestId), fen: toFen(state.pos), done };
-			worker.postMessage({ type: 'search', id: hint.id, fen: hint.fen, level: 'hint' });
+			worker.post({ type: 'search', id: hint.id, fen: hint.fen, level: 'hint' });
 			return true;
 		},
 

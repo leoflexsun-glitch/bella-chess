@@ -181,6 +181,16 @@ await scenario('拍照复刻：没有棋盘的图给出提示，四角可手动�
 	assert.ok(await page.isHidden('#photo'));
 });
 
+await scenario('托管环境禁止 worker：电脑改在主线程思考，照样应答', { width: 1280, height: 800 }, async page => {
+	await page.addInitScript(() => { window.Worker = function () { throw new Error('worker-src blocked'); }; });
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'd2');
+	await click(page, 'd4');
+	await waitMoves(page, 2);
+	assert.equal((await moves(page))[0], 'd4');
+});
+
 await scenario('设置：棋盘主题与棋子套装', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
 	await page.click('#dlg-new [data-act="start"]');
