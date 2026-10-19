@@ -5,6 +5,7 @@ import { WHITE, BLACK, CAPTURE, fromFen, inCheck, colorOf, sanOf, START_FEN } fr
 import { balance } from './chess/material.js';
 import { createMatch } from './game/match.js';
 import { createBoard2d } from './view2d/board.js';
+import { applyBoardTexture } from './view2d/texture.js';
 import { createView3d } from './view3d/view3d.js';
 import { createShell } from './ui/shell.js';
 import { loadSettings, saveSettings, saveGame, loadGame } from './ui/settings.js';
@@ -372,6 +373,7 @@ function changeSetting(key, value) {
 function applySetting(key) {
 	const v = settings[key];
 	if (key === 'board' || key === 'pieces' || key === 'coords') body.dataset[key] = v;
+	if (key === 'board') applyBoardTexture(v);
 	else if (key === 'sound') audio.enabled = v === 'on';
 	else if (key === 'hints') refresh();
 	else if (key === 'view') setView(v);
@@ -417,6 +419,7 @@ const photo = createPhoto({
 // ── 启动 ─────────────────────────────────────────────────────────
 
 for (const key of ['board', 'pieces', 'coords']) body.dataset[key] = settings[key];
+applyBoardTexture(settings.board);
 shell.paintSettings(settings);
 
 const saved = loadGame();

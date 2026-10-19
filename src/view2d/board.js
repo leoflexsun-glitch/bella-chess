@@ -21,9 +21,12 @@ export function createBoard2d(host, intents = {}) {
 	root.className = 'b2d';
 	root.setAttribute('role', 'img');
 	root.setAttribute('aria-label', '棋盘');
-	root.innerHTML = '<div class="b2d-marks"></div><div class="b2d-coords"></div><div class="b2d-pieces"></div>' +
-		'<svg class="b2d-arrows" viewBox="0 0 8 8" aria-hidden="true"></svg><div class="b2d-promo" hidden></div>';
+	// 外层是边框（坐标写在边框上），内层网格才是 8×8 棋格；所有坐标换算都以网格为准。
+	root.innerHTML = '<div class="b2d-coords"></div><div class="b2d-grid"><div class="b2d-marks"></div><div class="b2d-pieces"></div>' +
+		'<svg class="b2d-arrows" viewBox="0 0 8 8" aria-hidden="true"></svg><div class="b2d-promo" hidden></div></div>';
 	host.append(root);
+
+	const grid = root.querySelector('.b2d-grid');
 
 	const marksLayer = root.querySelector('.b2d-marks');
 	const coordsLayer = root.querySelector('.b2d-coords');
@@ -77,14 +80,10 @@ export function createBoard2d(host, intents = {}) {
 	function renderCoords() {
 		let html = '';
 		for (let i = 0; i < 8; i++) {
-			// 底边写文件字母（落在最右下角），左边写行号（落在左上角）。
+			// 底边框写文件字母，左边框写行号，各自对准所在的列/行中心。
 			const file = flipped ? FILES[7 - i] : FILES[i];
 			const rank = flipped ? i + 1 : 8 - i;
-			// 坐标所在格的明暗决定字色：显示坐标 (x, y) 中 x+y 为偶数的是浅格。
-			const fileDark = (i + 7) % 2 === 1;
-			const rankDark = i % 2 === 1;
-			html += `<span class="cf ${fileDark ? 'on-dark' : 'on-light'}" style="--x:${i}">${file}</span>`;
-			html += `<span class="cr ${rankDark ? 'on-dark' : 'on-light'}" style="--y:${i}">${rank}</span>`;
+			html += `<span class="cf" style="--x:${i}">${file}</span><span class="cr" style="--y:${i}">${rank}</span>`;
 		}
 		coordsLayer.innerHTML = html;
 	}
@@ -135,7 +134,7 @@ export function createBoard2d(host, intents = {}) {
 	// ── 指针 ────────────────────────────────────────────────
 
 	function squareAt(clientX, clientY) {
-		const rect = root.getBoundingClientRect();
+		const rect = grid.getBoundingClientRect();
 		const x = Math.floor((clientX - rect.left) / rect.width * 8);
 		const y = Math.floor((clientY - rect.top) / rect.height * 8);
 		if (x < 0 || x > 7 || y < 0 || y > 7) return -1;
@@ -144,7 +143,7 @@ export function createBoard2d(host, intents = {}) {
 	}
 
 	function dragTo(clientX, clientY) {
-		const rect = root.getBoundingClientRect();
+		const rect = grid.getBoundingClientRect();
 		const size = rect.width / 8;
 		const x = clientX - rect.left - size / 2;
 		const y = clientY - rect.top - size / 2;
@@ -175,7 +174,7 @@ export function createBoard2d(host, intents = {}) {
 	root.addEventListener('pointermove', event => {
 		if (!drag || event.pointerId !== drag.id) return;
 		if (!drag.moved) {
-			const size = root.getBoundingClientRect().width / 8;
+			const size = grid.getBoundingClientRect().width / 8;
 			if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < Math.max(4, size * 0.12)) return;
 			drag.moved = true;
 			drag.el.classList.add('drag');
@@ -244,6 +243,7 @@ export function createBoard2d(host, intents = {}) {
 	return {
 		el: root,
 		squareAt,
+		squareSize: () => grid.getBoundingClientRect().width / 8,
 
 		// 直接摆到某局面（board 为 0x88 数组或带 board 字段的局面）。
 		setPosition(next) {

@@ -2,47 +2,50 @@
 
 @import './pieces.css';
 
-/* ── 棋盘主题：格色、上一步、选中、走子提示 ───────────────── */
+/* ── 棋盘主题 ────────────────────────────────────────────────
+   格色由"棋子主体亮度 vs 格子亮度"的对比度（WCAG 相对亮度公式）反推：浅格亮度≈0.60、深格≈0.215。
+   以纯白纯黑的经典棋子计，白子/浅格 1.6、白子/深格 3.9、黑子/深格 5.3。
+   浅格再亮、深格再浅，白子就会和格子糊在一起。 */
 
-[data-board="green"] {
-	--sq-light: #eeeed2;
-	--sq-dark: #769656;
-	--hl-last: rgba(246, 246, 105, .58);
-	--hl-sel: rgba(246, 246, 105, .75);
-	--hint: rgba(0, 0, 0, .16);
-	--coord-on-light: #5c7a43;
-	--coord-on-dark: #f3f3dc;
-	--accent: #5d8a3c;
-}
-[data-board="brown"] {
-	--sq-light: #f0d9b5;
-	--sq-dark: #b58863;
-	--hl-last: rgba(155, 199, 0, .45);
-	--hl-sel: rgba(20, 85, 30, .45);
-	--hint: rgba(20, 85, 30, .5);
-	--coord-on-light: #946f51;
-	--coord-on-dark: #f6e7cf;
+[data-board="maple"] {
+	--sq-light: #e2c89c;
+	--sq-dark: #a5764d;
+	--frame: linear-gradient(145deg, #8f6642, #7c5636);
+	--coord: #f3e4c8;
+	--hint: rgba(40, 24, 8, .3);
 	--accent: #8b5a2b;
 }
-[data-board="blue"] {
-	--sq-light: #dee3e6;
-	--sq-dark: #8ca2ad;
-	--hl-last: rgba(155, 199, 0, .42);
-	--hl-sel: rgba(20, 85, 30, .45);
-	--hint: rgba(20, 85, 30, .5);
-	--coord-on-light: #72888f;
-	--coord-on-dark: #eef2f4;
-	--accent: #4c7286;
+[data-board="mist"] {
+	--sq-light: #c1cdd8;
+	--sq-dark: #6a839b;
+	--frame: linear-gradient(145deg, #5a7189, #4b6076);
+	--coord: #e6edf3;
+	--hint: rgba(8, 22, 40, .3);
+	--accent: #4c6b88;
+}
+[data-board="pale"] {
+	--sq-light: #d0ccab;
+	--sq-dark: #6d8760;
+	--frame: linear-gradient(145deg, #5f7653, #4f6445);
+	--coord: #eceadb;
+	--hint: rgba(16, 30, 10, .3);
+	--accent: #557a46;
+}
+[data-board] {
+	--hl-last: rgba(255, 221, 87, .48);
+	--hl-sel: rgba(255, 221, 87, .66);
 }
 
+/* 外层是细边框，坐标写在边框上；内层网格是 8×8 棋格。 */
 .b2d {
+	--fw: 4.2%;
 	position: relative;
 	width: 100%;
 	aspect-ratio: 1;
-	/* a8（左上）是浅格：conic 起点在正上方顺时针，第一象限画深格。 */
-	background: conic-gradient(var(--sq-dark) 0 25%, var(--sq-light) 0 50%, var(--sq-dark) 0 75%, var(--sq-light) 0) 0 0 / 25% 25%;
-	border-radius: 4px;
-	overflow: hidden;
+	padding: var(--fw);
+	background: var(--frame);
+	border-radius: 8px;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22);
 	touch-action: none;
 	user-select: none;
 	-webkit-user-select: none;
@@ -50,11 +53,21 @@
 	-webkit-tap-highlight-color: transparent;
 	container-type: inline-size;
 }
+.b2d-grid {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	/* 材质图（运行时程序生成，见 texture.js）未就绪时，先用纯色棋格。
+	   a8（左上）是浅格：conic 起点在正上方顺时针，第一象限画深格。 */
+	background:
+		var(--board-img, none) 0 0 / 100% 100%,
+		conic-gradient(var(--sq-dark) 0 25%, var(--sq-light) 0 50%, var(--sq-dark) 0 75%, var(--sq-light) 0) 0 0 / 25% 25%;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+	overflow: hidden;
+}
 
 .b2d-marks, .b2d-coords, .b2d-pieces, .b2d-promo { position: absolute; inset: 0; }
 .b2d-coords, .b2d-marks { pointer-events: none; }
-/* 坐标压在棋子之上（同 Lichess），底行字母不会被棋子挡住。 */
-.b2d-coords { z-index: 4; }
 
 /* 每个格内元素：12.5% 见方，靠 --x/--y 平移整格。 */
 .b2d .pc, .b2d .mk, .promo-choice {
@@ -74,13 +87,17 @@
 	background-repeat: no-repeat;
 	will-change: transform;
 }
-.b2d .pc { cursor: pointer; transition: transform 190ms cubic-bezier(.25, .8, .35, 1); z-index: 2; }
+.b2d .pc { cursor: pointer; transition: transform 190ms cubic-bezier(.25, .8, .35, 1); z-index: 2; filter: drop-shadow(0 1.5px 1.2px rgba(0, 0, 0, .24)); }
+/* 立体/华丽两套的白子主体偏灰（亮度约 0.8），在浅格上对比不足：补一圈极淡的深色描边。 */
+[data-pieces="celtic"] .b2d .pc[class*=" w"], [data-pieces="fantasy"] .b2d .pc[class*=" w"] {
+	filter: drop-shadow(0 0 .7px rgba(0, 0, 0, .65)) drop-shadow(0 1.5px 1.2px rgba(0, 0, 0, .24));
+}
 .b2d .pc.moving { z-index: 3; }
-.b2d .pc.drag {
+[data-pieces] .b2d .pc.drag {
 	transition: none;
 	z-index: 10;
 	cursor: grabbing;
-	filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .28));
+	filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .3));
 }
 .b2d .pc.snap { transition: none; }
 .b2d .pc.gone { opacity: 0; transform: translate(calc(var(--x) * 100%), calc(var(--y) * 100%)) scale(.6); transition: opacity 160ms ease, transform 160ms ease; }
@@ -95,17 +112,18 @@
 .mk.hover { box-shadow: inset 0 0 0 max(2px, .6cqi) rgba(255, 255, 255, .75); }
 .mk.warn { box-shadow: inset 0 0 0 max(2px, .55cqi) #f08a24; background: rgba(240, 138, 36, .18); }
 
-/* ── 坐标：贴在格内（底边文件字母、左边行号），颜色与所在格反差 ───── */
+/* ── 坐标：写在边框上，对准各列/行中心 ───────────────────── */
 
 .b2d-coords span {
 	position: absolute;
-	font: 600 max(9px, 2.3cqi)/1 var(--sans, system-ui);
-	letter-spacing: 0;
+	display: grid;
+	place-items: center;
+	font: 600 max(8px, 2.1cqi)/1 var(--sans, system-ui);
+	color: var(--coord);
+	opacity: .9;
 }
-.b2d-coords .cf { left: calc(var(--x) * 12.5% + 12.5% - .5em - 2px); bottom: 2px; }
-.b2d-coords .cr { top: calc(var(--y) * 12.5% + 2px); left: 3px; }
-.b2d-coords .on-light { color: var(--coord-on-light); }
-.b2d-coords .on-dark { color: var(--coord-on-dark); }
+.b2d-coords .cf { bottom: 0; height: var(--fw); width: 2em; left: calc(var(--fw) + (var(--x) + .5) * (100% - 2 * var(--fw)) / 8); transform: translateX(-50%); }
+.b2d-coords .cr { left: 0; width: var(--fw); height: 2em; top: calc(var(--fw) + (var(--y) + .5) * (100% - 2 * var(--fw)) / 8); transform: translateY(-50%); }
 [data-coords="off"] .b2d-coords { display: none; }
 
 /* ── 提示箭头 ─────────────────────────────────────────────── */

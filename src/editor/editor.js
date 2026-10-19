@@ -102,7 +102,7 @@ export function createEditor({ settings, onPlay, onPhoto, toast }) {
 			if (!ghost) {
 				ghost = document.createElement('i');
 				ghost.className = `pc drag-ghost ${code(piece)}`;
-				const size = view.el.getBoundingClientRect().width / 8;
+				const size = view.squareSize();
 				ghost.style.width = ghost.style.height = `${size}px`;
 				document.body.append(ghost);
 			}

@@ -136,7 +136,7 @@ await scenario('拍照复刻：截图导入 → 自动定位 → 识别 → 核�
 	await fresh(page);
 	const fen = 'r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP3PPP/R2QKB1R w KQ - 0 8';
 	await page.evaluate(f => {
-		localStorage.setItem('frostfall.v2', JSON.stringify({ board: 'brown', pieces: 'chessnut' }));
+		localStorage.setItem('frostfall.v2', JSON.stringify({ board: 'pale', pieces: 'celtic' }));
 		localStorage.setItem('frostfall.game', JSON.stringify({ fen: f, moves: [], human: 16, level: 'novice', flipped: true }));
 	}, fen);
 	await page.reload();
@@ -195,11 +195,11 @@ await scenario('设置：棋盘主题与棋子套装', { width: 1280, height: 80
 	await fresh(page);
 	await page.click('#dlg-new [data-act="start"]');
 	await page.click('[data-act="settings"]');
-	await page.click('#dlg-settings [data-setting="board"] [data-value="brown"]');
+	await page.click('#dlg-settings [data-setting="board"] [data-value="mist"]');
 	await page.click('#dlg-settings [data-setting="pieces"] [data-value="fantasy"]');
-	assert.deepEqual(await page.evaluate(() => [document.body.dataset.board, document.body.dataset.pieces]), ['brown', 'fantasy']);
+	assert.deepEqual(await page.evaluate(() => [document.body.dataset.board, document.body.dataset.pieces]), ['mist', 'fantasy']);
 	await page.reload();
-	assert.equal(await page.evaluate(() => document.body.dataset.board), 'brown', '设置应持久化');
+	assert.equal(await page.evaluate(() => document.body.dataset.board), 'mist', '设置应持久化');
 });
 
 await scenario('手机：触屏拖拽走子', { width: 390, height: 844 }, async (page, ctx) => {

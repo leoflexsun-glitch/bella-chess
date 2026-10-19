@@ -119,7 +119,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 	padding: 8px 20px 24px;
 }
 .board-col { width: var(--board); flex: none; display: flex; flex-direction: column; gap: 8px; }
-.board-wrap { position: relative; width: 100%; aspect-ratio: 1; border-radius: 6px; box-shadow: var(--shadow); }
+.board-wrap { position: relative; width: 100%; aspect-ratio: 1; border-radius: 8px; box-shadow: var(--shadow); }
 
 .player { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 2px; }
 .avatar { width: 36px; height: 36px; border-radius: 10px; background-color: var(--card); box-shadow: var(--shadow); background-size: 86%; background-position: center; flex: none; }
@@ -352,6 +352,8 @@ body[data-view="3d"] .moves li:nth-child(odd) { background: rgba(255, 255, 255, 
 	.controls { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
 	.cbtn { box-shadow: none; background: transparent; }
 	.status-card { padding: 10px 14px; }
+	/* 提示条浮在吸底操作条之上，不遮按钮。 */
+	.toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
 	.status { font-size: 15.5px; }
 	.editor-body, .photo-adjust { flex-direction: column; align-items: center; }
 	.editor-board { --board: min(calc(100vw - 16px), 560px); }
