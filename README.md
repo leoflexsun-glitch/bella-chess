@@ -23,7 +23,8 @@ npm test           # 走法 perft、局面校验、对局流程、识别模块�
 npm run e2e        # 浏览器端到端（需 Playwright：npx playwright install chromium）
 ```
 
-发布只需要根目录的 `index.html` 一个文件；GitHub Pages 直接发布仓库根目录即可。
+发布只需要根目录的 `index.html` 一个文件。网站由 `gh-pages` 分支经 GitHub Pages 发布：
+`npm run deploy` 会重新构建并把 `index.html` 推到该分支，约 1 分钟后线上生效。
 架构说明见 [`info.md`](info.md)，识别模型的训练与评测见 [`tools/vision/README.md`](tools/vision/README.md)。
 
 ## 第三方素材

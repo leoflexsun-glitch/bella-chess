@@ -9,7 +9,8 @@
     "build": "node scripts/build.mjs",
     "test": "node --test \"tests/**/*.test.mjs\"",
     "pieces": "node scripts/gen-pieces.mjs",
-    "e2e": "node tests/e2e/play.e2e.mjs"
+    "e2e": "node tests/e2e/play.e2e.mjs",
+    "deploy": "node scripts/deploy-pages.mjs"
   },
   "devDependencies": {
     "esbuild": "0.25.12",
