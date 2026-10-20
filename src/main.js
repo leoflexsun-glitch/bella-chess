@@ -45,7 +45,9 @@ let reviewPly = null;      // 正在查看的历史半步；null = 当前局面
 let flipped = false;
 let resignArmed = 0;
 let hintArrow = null;      // 电脑给出的提示着法 { from, to }，走子或悔棋后清除
-const clock = createClock();  // 本局用时：页面隐藏、关页、终局时停表
+// 本局用时：对局进行中且页面可见时计时（关页、切后台、终局后不计）。
+// 中途打开摆棋、拍照、设置等窗口照常计时——和真实棋钟一样，离开棋盘不算暂停。
+const clock = createClock();
 
 const shell = createShell({ onAction: handleAction, onSetting: changeSetting, onMoveClick: reviewTo });
 
@@ -88,7 +90,7 @@ const match = createMatch({
 		reviewPly = null;
 		// 悔棋时棋子平滑滑回原位；新开局、恢复存档直接摆好。
 		view.setPosition(match.state.pos, { animate: reason === 'undo' });
-		clock.resume();            // 终局后悔棋接着下，接着计时
+		syncClock();               // 终局后悔棋接着下，接着计时
 		refresh();
 	},
 	onTurn: () => refresh(),
@@ -101,12 +103,17 @@ const match = createMatch({
 		else if (move.promotion) audio.promote();
 		else if (captured) audio.capture();
 		else audio.place();
-		if (captured) haptics.capture(); else haptics.move();
 		// 将军提示只在真走出将军时给（悔棋、恢复存档不重复提醒）；将杀由终局接手。
-		if (!s.over && inCheck(s.pos)) {
+		const check = !s.over && inCheck(s.pos);
+		if (check) {
 			audio.check();
-			haptics.check();
 			if (live) view.pulse?.(s.pos.kings[s.pos.turn >> 3], 'check');
+		}
+		// 每步只震一种：新的震动会打断还没震完的上一个。终局由 onEnd 震。
+		if (!s.over) {
+			if (check) haptics.check();
+			else if (captured) haptics.capture();
+			else haptics.move();
 		}
 		if (mover !== match.state.human) clearSelection();
 		refresh();
@@ -114,7 +121,7 @@ const match = createMatch({
 	onThink: () => refresh(),
 	onEnd: over => {
 		clearSelection();
-		clock.stop();
+		syncClock();
 		const result = !over.winner ? 'draw' : over.winner === match.state.human ? 'win' : 'lose';
 		audio.end(result);
 		haptics.end(result);
@@ -170,9 +177,10 @@ function refresh() {
 	shell.setPlayers(player(bottom === WHITE ? BLACK : WHITE), player(bottom));
 
 	// 状态行
+	const result = playing && s.over ? resultText(s.over) : null;
 	if (!playing) shell.setStatus('选择对局方式开始');
 	else if (reviewPly !== null) shell.setStatus('正在复盘');
-	else if (s.over) shell.setStatus(resultText(s.over).title);   // 小屏手机上结算卡可能在屏幕外，胜负要在这里看得到
+	else if (result) shell.setStatus(result.title);   // 小屏手机上结算卡可能在屏幕外，胜负要在这里看得到
 	else if (s.thinking) shell.setStatus('电脑思考中…');
 	else if (s.pos.turn === s.human) shell.setStatus(checked >= 0 ? '将军！轮到你走' : '轮到你走', { check: checked >= 0 });
 	else shell.setStatus(`轮到${SIDE[s.pos.turn]}`);
@@ -181,7 +189,7 @@ function refresh() {
 	shell.setMoves(s.history, reviewPly === null ? s.history.length - 1 : reviewPly);
 	shell.setReview(reviewPly === null ? null
 		: reviewPly < 0 ? `起始局面 · 共 ${s.history.length} 步` : `第 ${reviewPly + 1} / ${s.history.length} 步`);
-	shell.setResult(playing && s.over ? resultText(s.over) : null);
+	shell.setResult(result);
 
 	shell.setControl('undo', { disabled: !playing || !s.history.some(h => h.mover === s.human) });
 	shell.setControl('resign', { disabled: !playing || Boolean(s.over) });
@@ -211,10 +219,19 @@ function resultText(over) {
 	return { title: won ? '你赢了！' : '你输了', sub: `${SIDE[over.winner]}胜 · ${reason}`, stats };
 }
 
+// 存档。没在下棋的页面不碰存档：否则一个停在开局对话框的标签页会清掉另一个标签页里正在下的那盘。
 function persist() {
 	const s = match.state;
-	if (!playing || s.over) { saveGame(null); return; }
-	saveGame({ fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() });
+	if (!playing) return;
+	saveGame(s.over ? null : { fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() });
+}
+
+const inProgress = () => playing && !match.state.over;
+
+// 计时与否只由一个条件决定：对局进行中且页面可见。
+function syncClock() {
+	if (inProgress() && !document.hidden) clock.resume();
+	else clock.stop();
 }
 
 // ── 选子与走子（两个视图共用） ───────────────────────────────────
@@ -471,12 +488,10 @@ for (const key of ['board', 'pieces', 'coords']) body.dataset[key] = settings[ke
 // 不支持震动的设备（iPhone 的 Safari、桌面电脑）不显示震动开关，免得开了没反应。
 if (!haptics.supported) shell.hideSetting('haptics');
 
-// 切到后台或关页：对局进行中就先存档（含已用时长）再停表；切回来接着计时。
-// 没在下棋时不写存档：否则关掉一个空页面会把另一个标签页里正在下的那盘清掉。
-const inProgress = () => playing && !match.state.over;
+// 切到后台或关页：对局进行中就先存档（含已用时长），再按可见性停表/续表。
 document.addEventListener('visibilitychange', () => {
-	if (document.hidden) { if (inProgress()) persist(); clock.stop(); }
-	else if (inProgress()) clock.resume();
+	if (document.hidden && inProgress()) persist();
+	syncClock();
 });
 window.addEventListener('pagehide', () => { if (inProgress()) persist(); });
 applyBoardTexture(settings.board);
@@ -486,8 +501,7 @@ const saved = loadGame();
 if (saved) {
 	playing = true;
 	flipped = Boolean(saved.flipped);
-	clock.start(saved.elapsed);
-	if (document.hidden) clock.stop();      // 在后台标签页里打开的，等切回来再计时
+	clock.start(saved.elapsed);             // restore 之后的 onReset 会按可见性决定是否计时
 	view.setFlipped(flipped);
 	match.restore(saved);
 	if (match.state.history.length) shell.toast('已恢复上一局', 1800);

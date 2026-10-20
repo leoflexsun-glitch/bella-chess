@@ -115,13 +115,13 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 			}
 		},
 
-		// 把设置值画到所有分段控件上（新对局、设置、摆棋里可能同时存在同一项）。
 		// 设备不支持的设置项整行隐藏（如没有震动马达）。
 		hideSetting(key) {
 			const row = document.querySelector(`[data-row="${key}"]`);
 			if (row) row.hidden = true;
 		},
 
+		// 把设置值画到所有分段控件上（新对局、设置、摆棋里可能同时存在同一项）。
 		paintSettings(settings) {
 			for (const seg of document.querySelectorAll('[data-setting]')) {
 				const value = settings[seg.dataset.setting];

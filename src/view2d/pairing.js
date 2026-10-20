@@ -3,12 +3,14 @@
 // 同种棋子之间按曼哈顿距离由近到远全局配对：沿直线退一格的兵优先于斜着的。
 // 若按格子顺序逐个找最近的，撤回 1.e4 d5 2.exd5 c6 时会把 c6 的兵滑到 d5，而 c7 凭空淡入。
 
+import { fileOf, rankOf } from '../chess/engine.js';
+
 export function pairPieces(have, need) {
 	const pairs = [];
 	for (const a of have) {
 		for (const b of need) {
 			if (a.code !== b.code) continue;
-			const d = Math.abs((a.sq & 15) - (b.sq & 15)) + Math.abs((a.sq >> 4) - (b.sq >> 4));
+			const d = Math.abs(fileOf(a.sq) - fileOf(b.sq)) + Math.abs(rankOf(a.sq) - rankOf(b.sq));
 			pairs.push({ from: a.sq, to: b.sq, d });
 		}
 	}

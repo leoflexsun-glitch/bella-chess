@@ -2,10 +2,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pairPieces } from '../src/view2d/pairing.js';
+import { parseSquare, squareName } from '../src/chess/engine.js';
 
-const SQ = name => (name.charCodeAt(0) - 97) + (Number(name[1]) - 1) * 16;
-const pcs = list => list.map(([sq, code]) => ({ sq: SQ(sq), code }));
-const names = sqs => sqs.map(s => String.fromCharCode(97 + (s & 15)) + ((s >> 4) + 1));
+const pcs = list => list.map(([sq, code]) => ({ sq: parseSquare(sq), code }));
+const names = sqs => sqs.map(squareName);
 
 test('撤回 2.exd5 c6：c6 的兵退回 c7，d5 的黑兵淡入，白兵退回 e4', () => {
 	const r = pairPieces(pcs([['d5', 'wP'], ['c6', 'bP']]), pcs([['e4', 'wP'], ['d5', 'bP'], ['c7', 'bP']]));

@@ -264,8 +264,8 @@ export function createBoard2d(host, intents = {}) {
 			el.style.transform = '';
 		}
 		renderMarks();
-		// 补上拖动期间推迟的对账；若已开始新动画或在等升变选择，由它们收尾。
-		if (stale && animating === 0 && promoLayer.hidden) render();
+		// 补上拖动期间推迟的对账：等弹回动画走完再重建；若已开始新动画或在等升变选择，由它们收尾。
+		if (stale && animating === 0 && promoLayer.hidden) settle();
 	}
 
 	root.addEventListener('pointerup', event => endDrag(event, false));
@@ -322,6 +322,7 @@ export function createBoard2d(host, intents = {}) {
 
 		// 播放一步棋；after 为走完后的局面，动画落定后据此对账。
 		playMove(move, after) {
+			fxLayer.replaceChildren();   // 上一步留下的特效（如将军脉冲）属于旧局面，王可能已经走开
 			board = Int8Array.from(after.board ?? after);
 			const el = pieces.get(move.from);
 			if (!el) { render(); return; }

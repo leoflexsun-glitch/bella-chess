@@ -21,19 +21,28 @@ export function createAudio() {
 	let out = null;
 	let on = true;
 
+	// 总线末端是无状态的软削波：单个声音（峰值约 -7 dBFS）完全线性通过，
+	// 几个声音叠在一起时才把尖峰圆滑地压在 0 dB 以内。
+	// 不用 DynamicsCompressor：Chromium 里它刚创建时处在最大压缩状态，开局第一声会小约 10 dB。
+	function build() {
+		const ac = new (window.AudioContext || window.webkitAudioContext)();
+		const clip = ac.createWaveShaper();
+		clip.curve = softClipCurve();
+		clip.oversample = '2x';
+		out = ac.createGain();
+		out.gain.value = 0.7 / CLIP_RANGE;
+		out.connect(clip).connect(ac.destination);
+		return ac;
+	}
+
 	const ready = () => {
 		if (!on) return null;
 		if (!ctx) {
-			ctx = new (window.AudioContext || window.webkitAudioContext)();
-			// 总线末端是无状态的软削波：单个声音（峰值约 -7 dBFS）完全线性通过，
-			// 几个声音叠在一起时才把尖峰圆滑地压在 0 dB 以内。
-			// 不用 DynamicsCompressor：Chromium 里它刚创建时处在最大压缩状态，开局第一声会小约 10 dB。
-			const clip = ctx.createWaveShaper();
-			clip.curve = softClipCurve();
-			clip.oversample = '2x';
-			out = ctx.createGain();
-			out.gain.value = 0.7 / CLIP_RANGE;
-			out.connect(clip).connect(ctx.destination);
+			try { ctx = build(); } catch {
+				// 浏览器禁用了 Web Audio 等：静音继续下棋，别让音效的异常打断走子流程。
+				on = false;
+				return null;
+			}
 		}
 		if (ctx.state === 'suspended') ctx.resume();
 		return ctx;

@@ -262,7 +262,10 @@ await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金�
 	}
 	assert.ok([...seen].some(c => c.includes('fx-capture')), '应出现吃子波纹');
 	assert.ok([...seen].some(c => c.includes('fx-check')), '应出现将军脉冲');
-	assert.deepEqual((await page.evaluate(() => window.vib)).slice(0, 2), [16, [12, 60, 12]], '吃子一震、将军两震');
+	// 吃子同时将军只震将军的两下：连着调用时后一个会打断前一个，吃子那一下根本震不出来
+	assert.deepEqual((await page.evaluate(() => window.vib))[0], [12, 60, 12], '吃子并将军：只震将军');
+	await waitMoves(page, 2);
+	assert.equal(await page.locator('#board2d .fx-check').count(), 0, '对方应着后，旧的将军脉冲应收掉');
 
 	// 一步杀：Qh8#，胜方王格金光
 	await reloadWith(page, { fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice' });
@@ -364,6 +367,68 @@ await scenario('悔棋后立刻拖子：拖拽不被动画收尾打断', { width
 	await page.mouse.up();
 	await waitMoves(page, 1);
 	assert.equal((await moves(page))[0], 'd4', '悔棋后立刻拖的这步应生效');
+
+	// 同样跨过对账时刻，但放到非法格：棋子要平滑弹回（同一个元素），不能被立即整盘重建打断
+	await waitMoves(page, 2);
+	const [x3, y3] = await point(page, 'c2'), [x4, y4] = await point(page, 'c6');
+	await page.keyboard.press('u');
+	await page.mouse.move(x3, y3);
+	await page.mouse.down();
+	await page.mouse.move(x3, y3 - 20, { steps: 3 });
+	await page.evaluate(() => { window.held = document.querySelector('#board2d .pc.drag'); });
+	await page.waitForTimeout(400);
+	await page.mouse.move(x4, y4, { steps: 4 });
+	await page.mouse.up();
+	assert.ok(await page.evaluate(() => window.held?.isConnected), '弹回过程中棋子元素不应被替换');
+	await page.waitForTimeout(400);
+	assert.equal(await page.locator('#board2d .pc[data-p=wP]').count(), 8, '弹回后局面完整');
+});
+
+// 在后台标签页里打开（如按住 Ctrl 点开、浏览器恢复会话）：切到前台之前不计时。
+await scenario('后台标签页打开存档：切到前台前不计时', { width: 1280, height: 800 }, async page => {
+	await page.addInitScript(() => {
+		if (!localStorage.getItem('test.bg')) return;
+		Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+		window.becomeVisible = () => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); };
+	});
+	await fresh(page);
+	await page.evaluate(() => localStorage.setItem('test.bg', '1'));
+	await reloadWith(page, { fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice', elapsed: 0 });
+	await page.waitForTimeout(3000);                     // 在后台放了 3 秒
+	await page.evaluate(() => window.becomeVisible());
+	await click(page, 'h1');
+	await click(page, 'h8');
+	await page.waitForSelector('[data-slot=result]:not([hidden])', { timeout: 3000 });
+	assert.match(await page.textContent('[data-slot=result-stats]'), /用时 0:0[01] /, '后台那 3 秒不应计入');
+});
+
+// 浏览器禁用了 Web Audio：静音照常下棋，电脑照常应答。
+await scenario('没有声音也能下：音频不可用时不影响走子', { width: 1280, height: 800 }, async page => {
+	await page.addInitScript(() => {
+		window.AudioContext = function () { throw new Error('Web Audio disabled'); };
+		delete window.webkitAudioContext;
+	});
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	assert.equal((await moves(page))[0], 'e4');
+});
+
+// 两个标签页：一个停在开局对话框，另一个在下棋。空闲的那个刷新界面时不能清掉别人的存档。
+await scenario('多标签页：空闲页面不清掉另一页的对局存档', { width: 1280, height: 800 }, async (page, ctx) => {
+	await fresh(page);                                   // 空闲页：停在新对局对话框
+	const other = await ctx.newPage();
+	await other.goto(URL);
+	await other.click('#dlg-new [data-act="start"]');
+	await click(other, 'e2');
+	await click(other, 'e4');
+	await waitMoves(other, 2);
+	assert.ok(await page.evaluate(() => localStorage.getItem('frostfall.game')), '下棋页应已存档');
+	await page.keyboard.press('Escape');
+	await page.keyboard.press('f');                      // 空闲页刷新界面
+	assert.ok(await page.evaluate(() => localStorage.getItem('frostfall.game')), '空闲页不应清掉另一页的存档');
 });
 
 // 系统开了"减少动态效果"：特效不显示，被吃棋子不淡出，结算卡不浮起。
