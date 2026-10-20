@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { fromFen, generateMoves, makeMove, sanOf, pieceList, squareName, WHITE } from '../../src/chess/engine.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const { chromium } = await import(process.env.PLAYWRIGHT_PATH || 'playwright');
@@ -887,6 +888,176 @@ await scenario('存档列表：不是今年的局带上年份', { width: 1280, h
 		{ fen: start, moves: ['e2e4'], human: 8, level: 'novice', elapsed: 0, savedAt: new Date(2020, 9, 21, 9, 5).getTime() })), START);
 	await page.reload();
 	assert.match(await page.textContent('#dlg-new .saved-item span'), /2020年10月21日 09:05/);
+});
+
+// ── 主链路：只用界面，随机走合法着法直到终局 ─────────────────────────
+// 每一步后都拿规则引擎按棋谱重放出的局面，对照棋盘上实际画出的棋子；中途插入悔棋、提示、翻转、复盘、刷新。
+// 随机着法会自然走到吃子、易位、吃过路兵、升变（含选择框）等。
+
+const CODE = 'PNBRQK';
+function replay(fen, sans) {
+	const pos = fromFen(fen);
+	for (const san of sans) {
+		const move = generateMoves(pos).find(m => sanOf(pos, m) === san);
+		assert.ok(move, `棋谱里的 ${san} 在该局面下不合法（${sans.join(' ')}）`);
+		makeMove(pos, move);
+	}
+	return pos;
+}
+const expected = pos => pieceList(pos).map(({ sq, type, color }) => squareName(sq) + (color === WHITE ? 'w' : 'b') + CODE[type - 1]).sort();
+const drawn = page => page.evaluate(() => {
+	const flipped = document.querySelector('#board2d .cf')?.textContent === 'h';
+	return [...document.querySelectorAll('#board2d .b2d-pieces .pc:not(.gone)')].map(el => {
+		let x = Number(el.style.getPropertyValue('--x')), y = Number(el.style.getPropertyValue('--y'));
+		if (flipped) { x = 7 - x; y = 7 - y; }
+		return 'abcdefgh'[x] + (8 - y) + el.dataset.p;
+	}).sort();
+});
+// 棋盘画面与规则局面一致（动画收尾有先后，给 1.5 秒）。
+async function boardMatches(page, pos, label) {
+	const want = expected(pos);
+	let got;
+	for (let i = 0; i < 15; i++) {
+		got = await drawn(page);
+		if (got.join() === want.join()) return;
+		await page.waitForTimeout(100);
+	}
+	assert.deepEqual(got, want, `${label}：棋盘画面与规则局面不一致`);
+}
+const resultShown = page => page.isVisible('[data-slot=result]:not([hidden])');
+
+async function playOut(page, { fen = START, human, seed, maxPlies = 160, label }) {
+	let r = seed;
+	const rand = n => { r = (r * 1103515245 + 12345) >>> 0; return (r >>> 16) % n; };
+	const humanColor = human === 'b' ? 16 : 8;
+	let step = 0;
+	for (;;) {
+		// 等到轮到人走（电脑应完）或终局
+		await page.waitForFunction(([hc]) => {
+			if (!document.querySelector('[data-slot=result]')?.hidden) return true;
+			const n = document.querySelectorAll('.moves [data-ply]').length;
+			return window.__turnOf?.(n) === hc;
+		}, [humanColor], { timeout: 30000 }).catch(() => {});
+		const sans = await moves(page);
+		const pos = replay(fen, sans);
+		await boardMatches(page, pos, `${label} 第 ${sans.length} 步后`);
+		if (await resultShown(page)) {
+			const legal = generateMoves(pos);
+			assert.ok(!legal.length || pos.half >= 100 || /和|认输|重复|子力/.test(await page.textContent('[data-slot=result]')), `${label}：还有合法着法却显示了结算（${sans.join(' ')}）`);
+			return sans;
+		}
+		assert.equal(pos.turn, humanColor, `${label}：等到的不是人走（${sans.join(' ')}）`);
+		const legal = generateMoves(pos);
+		assert.ok(legal.length, `${label}：没有合法着法却没显示结算（${sans.join(' ')}）`);
+		if (sans.length >= maxPlies) {                        // 太长：认输收尾
+			await page.click('.controls [data-act="resign"]');
+			await page.click('.controls [data-act="resign"]');
+			await page.waitForSelector('[data-slot=result]:not([hidden])', { timeout: 3000 });
+			return sans;
+		}
+		step++;
+		// 穿插辅助操作
+		if (step === 3) {                                     // 提示：出现箭头
+			await page.click('.controls [data-act="hint"]');
+			await page.waitForSelector('#board2d .b2d-arrows line', { state: 'attached', timeout: 8000 });
+		}
+		if (step === 4) {                                     // 翻转
+			await page.click('.controls [data-act="flip"]');
+			await boardMatches(page, pos, `${label} 翻转后`);
+		}
+		if (step === 5 && sans.length >= 3) {                 // 复盘到第 1 步，再回到当前
+			await page.click('.moves [data-ply] >> nth=0');
+			await boardMatches(page, replay(fen, sans.slice(0, 1)), `${label} 复盘第 1 步`);
+			await page.click('[data-act="review-exit"]');
+			await boardMatches(page, pos, `${label} 复盘回到当前`);
+		}
+		if (step === 6) {                                     // 刷新：回到同一局
+			await page.reload();
+			await page.waitForSelector('#boot', { state: 'detached', timeout: 5000 });
+			assert.deepEqual(await moves(page), sans, `${label}：刷新后棋谱应不变`);
+			await boardMatches(page, pos, `${label} 刷新后`);
+		}
+		if (step === 8 && sans.length >= 4) {                 // 悔棋：退回上一次轮到人走
+			await page.click('.controls [data-act="undo"]');
+			await page.waitForTimeout(400);
+			const back = await moves(page);
+			assert.ok(back.length < sans.length, `${label}：悔棋后棋谱应变短`);
+			await boardMatches(page, replay(fen, back), `${label} 悔棋后`);
+			continue;
+		}
+		const move = legal[rand(legal.length)];
+		await click(page, squareName(move.from));
+		await click(page, squareName(move.to));
+		if (move.promotion) {
+			await page.click(`.promo-choice[data-type="${move.promotion}"]`);
+		}
+		await page.waitForFunction(n => document.querySelectorAll('.moves [data-ply]').length > n, sans.length, { timeout: 5000 })
+			.catch(() => { throw new Error(`${label}：点 ${squareName(move.from)}→${squareName(move.to)}（${sanOf(pos, move)}）没有走出（${sans.join(' ')}）`); });
+	}
+}
+
+// 页面里给测试用的"第 n 步后轮到谁"：按棋谱条数与起始行棋方推算。
+const exposeTurn = (page, fen) => page.addInitScript(f => {
+	const first = f.split(' ')[1] === 'b' ? 16 : 8;
+	window.__turnOf = n => (n % 2 === 0 ? first : (first === 8 ? 16 : 8));
+}, fen);
+
+for (const [label, viewport, side, seed] of [
+	['桌面执白', { width: 1280, height: 800 }, 'w', 7],
+	['手机执黑', { width: 390, height: 844 }, 'b', 11],
+	['桌面执白 2', { width: 1280, height: 800 }, 'w', 29]
+]) {
+	await scenario(`主链路：${label}，随机走完整盘，画面始终与规则一致`, viewport, async page => {
+		await exposeTurn(page, START);
+		await fresh(page);
+		await page.click(`#dlg-new [data-setting="side"] [data-value="${side}"]`);
+		await page.click('#dlg-new [data-setting="level"] [data-value="novice"]');
+		await page.click('#dlg-new [data-act="start"]');
+		const sans = await playOut(page, { human: side, seed, label });
+		assert.ok(await resultShown(page), `${label}：应显示结算`);
+		const special = ['O-O', 'x', '='].filter(t => sans.some(m => m.includes(t))).join(' ');
+		console.log(`     ${label}：${sans.length} 步，${(await page.textContent('[data-slot=result-title]')).trim()}；出现过 ${special}`);
+		// 再来一局：同一执子方的全新一局
+		await page.click('[data-act="rematch"]');
+		await page.waitForFunction(() => document.querySelector('[data-slot=result]').hidden);
+		if (side === 'b') await waitMoves(page, 1);
+		assert.ok((await moves(page)).length <= 1, `${label}：再来一局应清空棋谱（上一局 ${sans.length} 步）`);
+		await boardMatches(page, replay(START, await moves(page)), `${label} 再来一局`);
+	});
+}
+
+await scenario('主链路：界面上易位、吃过路兵', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	// 白王车在原位、可短易位；e5 兵旁边黑兵刚走 d7d5，可吃过路兵
+	const fen = 'r3k2r/ppp2ppp/8/3pP3/8/8/PPP2PPP/R3K2R w KQkq d6 0 1';
+	await exposeTurn(page, fen);
+	await reloadWith(page, { fen, moves: [], human: 8, level: 'novice', elapsed: 0 });
+	await page.waitForSelector('#boot', { state: 'detached', timeout: 3000 });
+	await click(page, 'e5');
+	await click(page, 'd6');
+	await waitMoves(page, 2);
+	let sans = await moves(page);
+	assert.equal(sans[0], 'exd6');
+	await boardMatches(page, replay(fen, sans), '吃过路兵后');
+	const pos = replay(fen, sans);
+	if (generateMoves(pos).some(m => sanOf(pos, m) === 'O-O')) {
+		await click(page, 'e1');
+		await click(page, 'g1');
+		await waitMoves(page, 4);
+		sans = await moves(page);
+		assert.equal(sans[2], 'O-O');
+		await boardMatches(page, replay(fen, sans), '易位后');
+	}
+});
+
+await scenario('主链路：逼和显示和棋', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await reloadWith(page, { fen: '7k/5K2/8/8/8/8/8/6Q1 w - - 0 1', moves: [], human: 8, level: 'novice', elapsed: 0 });
+	await page.waitForSelector('#boot', { state: 'detached', timeout: 3000 });
+	await click(page, 'g1');
+	await click(page, 'g6');
+	await page.waitForSelector('[data-slot=result]:not([hidden])', { timeout: 3000 });
+	assert.match(await page.textContent('[data-slot=result]'), /和/);
 });
 
 await browser.close();
