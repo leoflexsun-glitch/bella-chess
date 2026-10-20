@@ -865,6 +865,22 @@ await scenario('多标签页：列表里的局已在别的页面下完，点它�
 	assert.ok(await b.isVisible('#dlg-new[open]'), '弹窗留着，可以开新局');
 });
 
+// 列表里的局恢复出来直接是终局（比如旧版本写下的）：只结束这局，本页原来那局要留在列表里。
+await scenario('接着下的局恢复后即终局：本页原来那局不被删', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	await page.evaluate(start => localStorage.setItem('frostfall.game.mated', JSON.stringify(
+		{ fen: start, moves: ['f2f3', 'e7e5', 'g2g4', 'd8h4'], human: 8, level: 'novice', elapsed: 0, savedAt: Date.now() })), START);
+	await page.click('.topbar [data-act="new"]');
+	await page.click('#dlg-new .saved-item >> nth=0');
+	await page.waitForSelector('[data-slot=result]:not([hidden])');
+	await page.click('.topbar [data-act="new"]');
+	assert.equal(await page.locator('#dlg-new .saved-item').count(), 1, '原来那局还在列表里');
+});
+
 await browser.close();
 server.close();
 if (errors.length) { console.log('页面错误：\n  ' + errors.join('\n  ')); process.exitCode = 1; }

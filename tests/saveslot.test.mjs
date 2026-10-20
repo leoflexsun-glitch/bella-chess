@@ -67,6 +67,42 @@ test('最多留 8 局；坏数据不列出；旧版单一存档并入列表', ()
 	assert.deepEqual(left, [10, 9, 8, 7, 6, 5, 4, 3, 2], '留下最新的：本页这局 + 之前 8 局');
 });
 
+test('挪存档时新键写不进去：沿用原条，不删', () => {
+	const local = memory();
+	local.setItem('frostfall.game.x', JSON.stringify(game(3)));
+	const full = { ...local, get length() { return local.length; }, key: i => local.key(i), getItem: k => local.getItem(k), removeItem: k => local.removeItem(k),
+		setItem: (k, v) => { if (k !== 'frostfall.game.x') throw new Error('quota'); local.setItem(k, v); } };
+	const session = memory(), a = createSaveSlots({ storage: full, session });
+	a.begin('frostfall.game.x');
+	assert.equal(local.getItem('frostfall.game.x') !== null, true, '原条还在');
+	assert.equal(a.previous, 'frostfall.game.x');
+	assert.equal(a.save(game(4)), true, '接着写原条');
+});
+
+test('一步没走的局不留：反复开新局不会挤掉没下完的局', () => {
+	const local = memory(), a = createSaveSlots({ storage: local, session: memory(), now: tick });
+	for (let i = 0; i < 8; i++) { a.begin(); a.save(game(i + 1)); }
+	for (let i = 0; i < 10; i++) { a.begin(); a.save(game(0)); }   // 连开 10 局都没走棋
+	const left = createSaveSlots({ storage: local, session: memory() }).list();
+	assert.deepEqual(left.filter(e => e.game.moves.length).map(e => e.game.moves.length), [8, 7, 6, 5, 4, 3, 2, 1]);
+});
+
+test('选中最旧的那局接着下：不会马上被当成最旧的删掉', () => {
+	const local = memory(), a = createSaveSlots({ storage: local, session: memory(), now: tick });
+	for (let i = 0; i < 9; i++) { a.begin(); a.save(game(i + 1)); }
+	const c = createSaveSlots({ storage: local, session: memory(), now: tick });
+	const oldest = c.list().at(-1);
+	c.begin(oldest.key);
+	assert.equal(c.get(c.previous)?.moves.length, oldest.game.moves.length);
+});
+
+test('旧版存档并入列表时记上时间', () => {
+	const local = memory();
+	local.setItem('frostfall.game', JSON.stringify(game(2)));
+	const [e] = createSaveSlots({ storage: local, session: memory(), now: () => 12345 }).list();
+	assert.equal(e.game.savedAt, 12345);
+});
+
 test('存储不可用：不报错，按没有存档处理', () => {
 	const broken = { get length() { throw new Error('denied'); }, key() { throw new Error('denied'); }, getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
 	const a = createSaveSlots({ storage: broken, session: broken });

@@ -253,8 +253,8 @@ function continueGame(key) {
 		return;
 	}
 	saveGame();
+	saves.begin(key);          // 先挪到本页名下：恢复时若直接终局，onEnd 删的是这局，而不是本页原来那局
 	restoreGame(saved);
-	saves.begin(key);
 	shell.close('dlg-new');
 }
 
@@ -583,8 +583,9 @@ shell.paintSettings(settings);
 // 刷新：接着下本页刷新前那局。新开的页：在新对局对话框里选接着下哪一局，或开新局。
 const previous = saves.previous;
 const saved = previous && saves.get(previous);
-if (saved && restoreGame(saved)) {
+if (saved && validSave(saved)) {
 	saves.begin(previous);
+	restoreGame(saved);
 	if (match.state.history.length) shell.toast('已恢复上一局', 1800);
 } else {
 	view.setPosition(match.state.pos);

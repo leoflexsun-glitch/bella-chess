@@ -29,7 +29,7 @@ export function createSaveSlots({ storage, session, now = Date.now } = {}) {
 	// 旧版本只有一个存档位：挪成列表里的一条，删掉旧版的"谁在下"标记。
 	const legacy = store.get('frostfall.game');
 	if (legacy !== null) {
-		if (valid(legacy)) store.set(KEY_PREFIX + 'legacy', legacy);
+		if (valid(legacy)) store.set(KEY_PREFIX + 'legacy', { ...legacy, savedAt: legacy.savedAt ?? now() });
 		store.set('frostfall.game', null);
 	}
 	store.set('frostfall.active', null);
@@ -40,18 +40,20 @@ export function createSaveSlots({ storage, session, now = Date.now } = {}) {
 		// 本页刷新前在下的那局的键（没有则 null）。
 		get previous() { return tab.get(CURRENT); },
 		get(k) { return valid(store.get(k)); },
-		// 本页开始下一局。from 是接着下的那条存档：挪到本页的新键下。
+		// 本页开始下一局。from 是接着下的那条存档：挪到本页的新键下（记为刚存的，免得马上被当成最旧的删掉）。
+		// 新键写不进去（存满、被禁用）就沿用原键，不删原条。本页原来那局一步没走的话不留。
 		begin(from = null) {
+			if (key && !valid(store.get(key))?.moves.length) store.set(key, null);
 			key = KEY_PREFIX + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 			if (from) {
 				const game = store.get(from);
-				if (game) store.set(key, game);
-				store.set(from, null);
+				if (game && !store.set(key, { ...game, savedAt: now() })) key = from;
+				else store.set(from, null);
 				tab.set(CURRENT, key);
 			} else {
 				tab.set(CURRENT, null);
 			}
-			for (const e of all().slice(KEEP)) store.set(e.key, null);
+			for (const e of all().filter(e => e.key !== key).slice(KEEP)) store.set(e.key, null);
 		},
 		save(snapshot) {
 			if (!key) return false;
