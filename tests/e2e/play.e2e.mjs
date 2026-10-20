@@ -848,6 +848,23 @@ await scenario('多标签页：新开的页从列表选一局接着下，两边�
 	assert.equal(await d.locator('#dlg-new .saved-item').count(), 1);
 });
 
+await scenario('多标签页：列表里的局已在别的页面下完，点它刷新列表', { width: 1280, height: 800 }, async (page, ctx) => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	const b = await ctx.newPage();
+	await b.goto(URL);
+	await b.waitForSelector('#dlg-new .saved-item');
+	await page.click('.controls [data-act="resign"]');
+	await page.click('.controls [data-act="resign"]');
+	await page.waitForSelector('[data-slot=result]:not([hidden])');
+	await b.click('#dlg-new .saved-item');
+	await b.waitForSelector('#dlg-new [data-slot=saved][hidden]', { state: 'attached', timeout: 1000 });
+	assert.ok(await b.isVisible('#dlg-new[open]'), '弹窗留着，可以开新局');
+});
+
 await browser.close();
 server.close();
 if (errors.length) { console.log('页面错误：\n  ' + errors.join('\n  ')); process.exitCode = 1; }

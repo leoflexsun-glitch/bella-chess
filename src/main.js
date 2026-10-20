@@ -247,7 +247,11 @@ function saveGame() {
 // 接着下列表里的某一局：先存好本页这局（它留在列表里），再把选中的那局挪到本页名下。
 function continueGame(key) {
 	const saved = saves.get(key);
-	if (!saved || !validSave(saved)) return;
+	if (!saved || !validSave(saved)) {         // 弹窗开着时这局已在别的页面下完：刷新列表
+		openNew();
+		shell.toast('这局已经下完或不在了', 2000);
+		return;
+	}
 	saveGame();
 	restoreGame(saved);
 	saves.begin(key);
