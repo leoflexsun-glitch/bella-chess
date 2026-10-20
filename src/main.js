@@ -4,6 +4,7 @@
 import { WHITE, BLACK, CAPTURE, KCASTLE, QCASTLE, fromFen, inCheck, colorOf, sanOf, other, START_FEN } from './chess/engine.js';
 import { balance } from './chess/material.js';
 import { createMatch } from './game/match.js';
+import { prepare } from './chess/setup.js';
 import { createBoard2d } from './view2d/board.js';
 import { applyBoardTexture } from './view2d/texture.js';
 import { createView3d } from './view3d/view3d.js';
@@ -257,33 +258,55 @@ function standBy() {
 
 // 用户回到本页（切到前台、点按、按键）：接手这盘棋。之前若是别的页在下，就从存档读出最新局面——
 // 别的页可能已经接着下了。存档标着"已下完"：本页这局还在进行就说明它已在别处结束，作废并回到新对局
-// （本页这局本来就结束了则留着结算）。存档为空（比如存储被清空）：以本页为准接着存。
+// （本页这局本来就结束了则留着结算）。存档为空（比如存储被清空）：以本页为准，接着下、接着存。
+// 返回画面是否因此变了（读出了别处的对局、回到新对局、或收起了待命提示）——变了的话，
+// 触发接手的那次点按/按键就不再往下传，免得作用到用户还没看见的局面上。
 function resume() {
-	if (lock.claim()) return;
-	shell.setStandby(false);
+	if (lock.claim()) return false;
+	const hadNotice = shell.setStandby(false);
 	const saved = saveSlot.load();
-	if (saved) {
+	if (saved && restoreGame(saved)) {
 		shell.close('dlg-new');            // 别在对话框后面悄悄换了局面：让用户看到接回的这盘
-		restoreGame(saved);
-	} else if (saveSlot.finished && inProgress()) {
+		return true;
+	}
+	if (saveSlot.finished && inProgress()) {
 		playing = false;
+		flipped = false;
+		view.setFlipped(false);
 		match.newGame();
 		if (!editor.isOpen && !photo.isOpen) shell.open('dlg-new');   // 正在摆棋、拍照时不打扰
-	} else if (inProgress()) {
-		// 存档为空（比如存储被清空）：以本页为准。重新"恢复"一遍本页的局面——
-		// 待命时停下的电脑思考与计时随之恢复——再存上。
-		restoreGame(currentSnapshot());
+		return true;
+	}
+	if (inProgress()) {
+		match.resume();                    // 待命时停下的电脑思考接着来
+		syncClock();
 		saveGame();
-	} else refresh();
+	}
+	refresh();
+	return hadNotice;
 }
 
+// 存档要先校验：损坏或来路不明的存档（旧版本、手改、同域的别的应用）不能让页面卡在启动画面。
+function validSave(saved) {
+	try {
+		return (saved.human === WHITE || saved.human === BLACK)
+			&& saved.moves.every(m => typeof m === 'string')
+			&& prepare(saved.fen).errors.length === 0;
+	} catch {
+		return false;
+	}
+}
+
+// 从存档恢复；存档不合格时什么都不改，返回 false。
 function restoreGame(saved) {
+	if (!validSave(saved)) return false;
 	playing = true;
 	gameNo++;
 	flipped = Boolean(saved.flipped);
 	clock.start(saved.elapsed);             // restore 之后的 onReset 会按可见性决定是否计时
 	view.setFlipped(flipped);
 	match.restore(saved);
+	return true;
 }
 
 const kingSq = (pos, color) => pos.kings[color >> 3];
@@ -569,25 +592,30 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', saveGame);
 // 两个窗口并排时，切到另一个窗口不会触发 visibilitychange：失焦时也存一次用时，免得被接手时丢掉。
 window.addEventListener('blur', saveGame);
-// 对局进行中、页面可见时每 15 秒存一次用时：别的窗口抢先接手时（失焦存档与对方接手跨进程、先后不定）最多丢 15 秒。
-setInterval(() => { if (!document.hidden) saveGame(); }, 15000);
+// 对局进行中、窗口有焦点时每 15 秒存一次用时：别的窗口抢先接手时（失焦存档与对方接手跨进程、先后不定）最多丢 15 秒。
+// 没有焦点时失焦那一刻已经存过。
+setInterval(() => { if (!document.hidden && document.hasFocus()) saveGame(); }, 15000);
 
 // 在待命的窗口里点按或按本应用的快捷键，就接回这盘棋。这一下只用来接回，不作用到刚读出的局面上：
 // 按下被拦住，同一次的抬起与随后的 click 也吞掉。组合键、功能键（切窗口、刷新、查找等）不拦。
 let swallowPointer = null, swallowClick = false;
 const appKey = event => !event.ctrlKey && !event.metaKey && !event.altKey
-	&& (event.key.length === 1 || ['Enter', 'Escape', 'ArrowLeft', 'ArrowRight'].includes(event.key));
+	&& (event.key?.length === 1 || ['Enter', 'Escape', 'ArrowLeft', 'ArrowRight'].includes(event.key));
 const takeOver = event => {
-	resume();
+	if (!resume()) return false;       // 画面没变（比如两边都没有对局）：这一下照常生效
 	event.preventDefault();
 	event.stopPropagation();
+	return true;
 };
 addEventListener('pointerdown', event => {
+	if (!event.isPrimary && swallowPointer !== null) {   // 接手那一下按着时落下的其他手指，一并吞掉
+		event.preventDefault();
+		event.stopPropagation();
+		return;
+	}
 	swallowClick = false;
 	swallowPointer = null;
-	if (lock.check()) return;
-	swallowPointer = event.pointerId;
-	takeOver(event);
+	if (!lock.check() && takeOver(event)) swallowPointer = event.pointerId;
 }, { capture: true });
 addEventListener('pointerup', event => {
 	if (event.pointerId !== swallowPointer) return;
@@ -603,7 +631,8 @@ addEventListener('click', event => {
 	event.preventDefault();
 	event.stopPropagation();
 }, { capture: true });
-addEventListener('keydown', event => { if (appKey(event) && !lock.check()) takeOver(event); }, { capture: true });
+// 按住键自动连发时不必每次现读存储
+addEventListener('keydown', event => { if (!event.repeat && appKey(event) && !lock.check()) takeOver(event); }, { capture: true });
 applyBoardTexture(settings.board);
 shell.paintSettings(settings);
 
@@ -611,8 +640,7 @@ shell.paintSettings(settings);
 const background = document.hidden;
 if (!background) lock.claim();
 const saved = background ? null : saveSlot.load();
-if (saved) {
-	restoreGame(saved);
+if (saved && restoreGame(saved)) {
 	if (match.state.history.length) shell.toast('已恢复上一局', 1800);
 } else {
 	view.setPosition(match.state.pos);

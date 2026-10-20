@@ -3,7 +3,7 @@
 // 谁在下只记在存储里一处（KEY）。held 是缓存，给频繁调用的地方用；写存档、清档、接手等关键时刻用 check()
 // 现读存储——标签页被冻结、从往返缓存恢复等情况下错过了通知，也能借此发现并转为待命。
 // 别的页接手时本页通常能通过 storage 事件立刻得知（onLost），好停下思考、显示待命。
-// 存储写不进去时只有本页能用存档，算本页在下；一旦收到别的页的 storage 事件（说明存储能用）就取消。
+// 存储写不进去时只有本页能用存档，算本页在下；一旦别的页接手（收到"谁在下"变化的通知）就取消。
 
 import { jsonStore } from '../core/store.js';
 
@@ -18,9 +18,11 @@ export function createTabLock({ storage, events = globalThis, onLost } = {}) {
 	const lose = () => { held = false; onLost?.(); };
 
 	events.addEventListener?.('storage', event => {
+		// 只看"谁在下"这个键（key 为 null 表示存储被整个清空）。别的页写进了它，说明别的页接手了：
+		// 本页因写入失败而"独占"也到此为止。别的键的变化与本页在不在下无关。
+		if (event.key !== null && event.key !== KEY) return;
 		solo = false;
-		// key 为 null 表示存储被整个清空
-		if (held && (event.key === null || event.key === KEY) && !owned()) lose();
+		if (held && !owned()) lose();
 	});
 
 	return {

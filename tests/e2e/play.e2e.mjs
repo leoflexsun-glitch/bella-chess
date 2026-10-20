@@ -288,16 +288,16 @@ await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金�
 	await waitMoves(page, 2);
 	assert.equal(await page.locator('#board2d .fx-check').count(), 0, '对方应着后，旧的将军脉冲应收掉');
 
-	// 一步杀：Qh8#，胜方王格金光
-	await reloadWith(page, { fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice' });
+	// 一步杀：Qg8#（后在 g1，王 b6 挡住对角线，黑王不在被将军状态），胜方王格金光
+	await reloadWith(page, { fen: 'k7/8/1K6/8/8/8/8/6Q1 w - - 0 1', moves: [], human: 8, level: 'novice' });
 	await exposeEffects(page);
 	await page.keyboard.press('h');                      // 提示箭头（应在棋子之下）
-	await page.waitForSelector('#board2d .b2d-arrows line', { timeout: 8000 });
+	await page.waitForSelector('#board2d .b2d-arrows line', { state: 'attached', timeout: 8000 })   // 竖直的箭头包围盒宽为 0，按"可见"等会一直等不到;
 	await assertPiecesUnobscured(page, '提示箭头');
 	assert.equal(await page.locator('#board2d .mk.hint-from').count(), 1, '提示起点格应有绿框');
 	assert.equal(await page.locator('#board2d .mk.hint-to').count(), 1, '提示落点格应有绿框（吃子时箭头头部在棋子下）');
-	await click(page, 'h1');
-	await click(page, 'h8');
+	await click(page, 'g1');
+	await click(page, 'g8');
 	await page.waitForSelector('#board2d .fx-win', { timeout: 3000 });
 	for (let i = 0; i < 4; i++) { await page.waitForTimeout(250); await assertPiecesUnobscured(page, `胜利金光 ${i}`); }
 	assert.ok(await page.locator('#board2d .mk.win').count() === 1, '胜方王格应有金色底光');
@@ -373,9 +373,9 @@ await scenario('手机横排棋谱：当前着法始终可见', { width: 375, he
 // 小屏手机终局：结算卡把棋谱挤出屏幕，也不能带动整页滚动（棋盘顶行会藏到标题栏下）。
 await scenario('小屏手机终局：页面不跳动、状态行看得到胜负', { width: 375, height: 667 }, async page => {
 	await fresh(page);
-	await reloadWith(page, { fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice' });
-	await click(page, 'h1');
-	await click(page, 'h8');
+	await reloadWith(page, { fen: 'k7/8/1K6/8/8/8/8/6Q1 w - - 0 1', moves: [], human: 8, level: 'novice' });
+	await click(page, 'g1');
+	await click(page, 'g8');
 	await page.waitForSelector('[data-slot=result]:not([hidden])', { timeout: 3000 });
 	await page.waitForTimeout(200);
 	assert.equal(await page.evaluate(() => scrollY), 0, '终局时整页不应滚动');
@@ -445,11 +445,11 @@ await scenario('后台标签页打开存档：切到前台前不计时', { width
 	});
 	await fresh(page);
 	await page.evaluate(() => localStorage.setItem('test.bg', '1'));
-	await reloadWith(page, { fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice', elapsed: 0 });
+	await reloadWith(page, { fen: 'k7/8/1K6/8/8/8/8/6Q1 w - - 0 1', moves: [], human: 8, level: 'novice', elapsed: 0 });
 	await page.waitForTimeout(3000);                     // 在后台放了 3 秒
 	await page.evaluate(() => window.becomeVisible());
-	await click(page, 'h1');
-	await click(page, 'h8');
+	await click(page, 'g1');
+	await click(page, 'g8');
 	await page.waitForSelector('[data-slot=result]:not([hidden])', { timeout: 3000 });
 	assert.match(await page.textContent('[data-slot=result-stats]'), /用时 0:0[01] /, '后台那 3 秒不应计入');
 });
@@ -466,6 +466,28 @@ await scenario('后台标签页打开（无存档）：切过来时看到新对�
 	await page.reload();
 	await page.evaluate(() => window.becomeVisible());
 	assert.ok(await page.isVisible('#dlg-new[open]'));
+});
+
+// 损坏或来路不明的存档（旧版本、手改、同域的别的应用）：不能卡在启动画面，按没有存档处理。
+await scenario('损坏的存档：照常启动，回到新对局', { width: 1280, height: 800 }, async page => {
+	for (const bad of [{ fen: '', moves: [], human: 8 }, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', moves: [1], human: 8 }, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', moves: [], human: 3 }]) {
+		await fresh(page);
+		await reloadWith(page, bad);
+		await page.waitForSelector('#boot', { state: 'detached', timeout: 3000 });
+		assert.ok(await page.isVisible('#dlg-new[open]'), `存档 ${JSON.stringify(bad)} 应按没有存档处理`);
+	}
+	// 没有 key 的合成键盘事件（自动填充、密码管理器会发）不应报错
+	await page.evaluate(() => { dispatchEvent(new Event('keydown')); document.body.dispatchEvent(new Event('keydown', { bubbles: true })); });
+});
+
+// 两边都没有对局时，在不"在下"的那页里点按钮：没有什么可接回的，这一下照常生效。
+await scenario('多标签页：没有对局可接回时，点击照常生效', { width: 1280, height: 800 }, async (page, ctx) => {
+	await fresh(page);
+	const other = await ctx.newPage();
+	await other.goto(URL);                               // B 打开（停在新对局），本页不再"在下"
+	await page.click('#dlg-new [data-act="start"]');     // 回到本页直接点"开始对局"
+	assert.ok(await page.isHidden('#dlg-new[open]'), '一点就开局，不应被当成"接回"吞掉');
+	assert.equal(await page.textContent('[data-slot=status]'), '轮到你走');
 });
 
 // 浏览器禁用了 Web Audio：静音照常下棋，电脑照常应答。

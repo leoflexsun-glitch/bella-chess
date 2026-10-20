@@ -155,3 +155,22 @@ test('托管环境禁止 worker 时退回主线程计算，电脑照样走棋', 
 		globalThis.Worker = Saved;
 	}
 });
+
+test('暂停（标签页待命）后：即使在走子回调里才暂停，电脑也不开始想；resume 后接着想', () => {
+	let m;
+	m = createMatch({ onMove: () => m.pause() });             // 模拟：走子时存档发现别的页已接手 → 转为待命
+	m.newGame({ human: WHITE, fen: '4k3/8/8/8/8/8/4P3/4K3 w - - 0 1' });
+	assert.ok(m.play(parseSquare('e2'), parseSquare('e4')));
+	assert.equal(posted.length, 0, '暂停后不应发出思考请求');
+	assert.equal(m.state.thinking, false);
+	m.resume();
+	assert.equal(posted.length, 1, '接回后轮到电脑就接着想');
+	assert.equal(m.state.thinking, true);
+});
+
+test('重新开局或恢复会解除暂停', () => {
+	const m = createMatch();
+	m.pause();
+	m.newGame({ human: WHITE, fen: '4k3/8/8/8/8/8/4P3/4K3 b - - 0 40' });
+	assert.equal(posted.length, 1);
+});

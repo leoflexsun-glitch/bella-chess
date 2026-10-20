@@ -158,10 +158,12 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 		},
 
 		// 待命提示：这盘棋正在另一个窗口里下，提供"在此继续"。
+		// 返回之前是否正显示着。
 		setStandby(on) {
-			const dialog = document.getElementById('dlg-standby');
-			if (on && !dialog.open) dialog.showModal();
-			else if (!on && dialog.open) dialog.close();
+			const dialog = document.getElementById('dlg-standby'), was = dialog.open;
+			if (on && !was) dialog.showModal();
+			else if (!on && was) dialog.close();
+			return was;
 		},
 
 		// 设备不支持的设置项整行隐藏（如没有震动马达）。

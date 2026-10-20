@@ -8,7 +8,7 @@
 //
 // 格子编号沿用引擎的 0x88：a8 = 0，h1 = 119。
 
-import { WHITE, KING, QUEEN, ROOK, BISHOP, KNIGHT, KCASTLE, QCASTLE, EP, typeOf, colorOf, onBoard } from '../chess/engine.js';
+import { WHITE, KING, QUEEN, ROOK, BISHOP, KNIGHT, KCASTLE, QCASTLE, EP, typeOf, colorOf, pieceList } from '../chess/engine.js';
 import { pairPieces } from './pairing.js';
 
 const LETTER = { 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
@@ -67,7 +67,7 @@ export function createBoard2d(host, intents = {}) {
 
 	// 逐个遍历盘上棋子：fn(sq, piece)。
 	function eachPiece(fn) {
-		for (let sq = 0; sq < 128; sq++) if (onBoard(sq) && board[sq]) fn(sq, board[sq]);
+		for (const { sq, type, color } of pieceList({ board })) fn(sq, type | color);
 	}
 
 	function makePiece(piece, sq) {
