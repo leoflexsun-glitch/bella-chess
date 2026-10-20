@@ -124,7 +124,7 @@ const match = createMatch({
 	onEnd: over => {
 		clearSelection();
 		syncClock();
-		if (playing && lock.held) saveSlot.clear();
+		if (playing && lock.check()) saveSlot.finish();
 		const result = outcome(over);
 		audio.end(result);
 		haptics.end(result);
@@ -234,41 +234,41 @@ const saveSlot = createSaveSlot();
 const lock = createTabLock({ onLost: standBy });
 let gameNo = 0;            // 每开一局、每恢复一次存档加一（升变选择据此作废）
 
-// 写存档：只写本页在下、仍在进行的对局。已结束的局由 onEnd 清档，不能再写回（否则会被当成进行中恢复）。
+// 写存档：只写本页在下、仍在进行的对局。已结束的局由 onEnd 写入终局标记，不能再写回（否则会被当成进行中恢复）。
 function saveGame() {
+	if (!inProgress() || !lock.check()) return;
 	const s = match.state;
-	if (!playing || s.over || !lock.held) return;
 	saveSlot.save({ fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() });
 }
 
-// 别的标签页接手了这盘棋：本页停下电脑思考与计时，不再写存档；显示待命遮罩（两个窗口并排时看得到）。
+// 别的标签页接手了这盘棋：本页停下电脑思考与计时，不再写存档。
+// 确实有一盘正在别处下时，显示待命提示（两个窗口并排时看得到；它是模态对话框，叠在其他对话框之上）。
 function standBy() {
 	match.pause();
 	clearSelection();
 	syncClock();
-	shell.setStandby(true);
+	if (saveSlot.load()) shell.setStandby(true);
 	refresh();
 }
 
 // 用户回到本页（切到前台、点按、按键）：接手这盘棋。之前若是别的页在下，就从存档读出最新局面——
-// 别的页可能已经接着下了；存档若已空，说明那盘已经下完：本页这局也已结束就留着结算，否则回到新对局。
-// 返回是否刚从别的页接回。
+// 别的页可能已经接着下了。存档标着"已下完"：本页这局还在进行就说明它已在别处结束，作废并回到新对局
+// （本页这局本来就结束了则留着结算）。存档为空（比如存储被清空）：以本页为准接着存。
 function resume() {
-	if (lock.claim()) return false;
+	if (lock.claim()) return;
 	shell.setStandby(false);
 	const saved = saveSlot.load();
 	if (saved) {
 		shell.close('dlg-new');            // 别在对话框后面悄悄换了局面：让用户看到接回的这盘
 		restoreGame(saved);
-		return true;
-	}
-	if (playing && !match.state.over) {
+	} else if (saveSlot.finished && inProgress()) {
 		playing = false;
 		match.newGame();
+		if (!editor.isOpen && !photo.isOpen) shell.open('dlg-new');   // 正在摆棋、拍照时不打扰
+	} else {
+		saveGame();
+		refresh();
 	}
-	if (!playing) shell.open('dlg-new');
-	refresh();
-	return true;
 }
 
 function restoreGame(saved) {
@@ -482,7 +482,7 @@ function handleAction(act) {
 		case 'copy': copyText(match.pgn(), '棋谱已复制（PGN）'); break;
 		case 'resume': resume(); break;
 		case 'resign':
-			if (!playing || match.state.over) break;
+			if (!inProgress()) break;
 			if (Date.now() - resignArmed < 3000) { resignArmed = 0; match.resign(); }
 			else { resignArmed = Date.now(); shell.toast('再按一次「认输」确认', 3000); }
 			break;
@@ -563,20 +563,38 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', saveGame);
 // 两个窗口并排时，切到另一个窗口不会触发 visibilitychange：失焦时也存一次用时，免得被接手时丢掉。
 window.addEventListener('blur', saveGame);
-// 在待命的窗口里点按或按键，就接回这盘棋。这次点按/按键只用来接回，不作用到刚读出的局面上。
-let swallowUntil = 0;
-for (const type of ['pointerdown', 'keydown']) {
-	addEventListener(type, event => {
-		if (lock.held) return;
-		resume();
-		swallowUntil = performance.now() + 600;
-		event.preventDefault();
-		event.stopPropagation();
-	}, { capture: true });
-}
-addEventListener('click', event => {
-	if (performance.now() < swallowUntil) { event.preventDefault(); event.stopPropagation(); }
+// 对局进行中、页面可见时每 15 秒存一次用时：别的窗口抢先接手时（失焦存档与对方接手跨进程、先后不定）最多丢 15 秒。
+setInterval(() => { if (!document.hidden) saveGame(); }, 15000);
+
+// 在待命的窗口里点按或按本应用的快捷键，就接回这盘棋。这一下只用来接回，不作用到刚读出的局面上：
+// 按下被拦住，同一次的抬起与随后的 click 也吞掉。组合键、功能键（切窗口、刷新、查找等）不拦。
+let swallowPointer = null, swallowClick = false;
+const appKey = event => !event.ctrlKey && !event.metaKey && !event.altKey
+	&& (event.key.length === 1 || ['Enter', 'Escape', 'ArrowLeft', 'ArrowRight'].includes(event.key));
+const takeOver = event => {
+	resume();
+	event.preventDefault();
+	event.stopPropagation();
+};
+addEventListener('pointerdown', event => {
+	swallowClick = false;
+	if (lock.check()) return;
+	swallowPointer = event.pointerId;
+	takeOver(event);
 }, { capture: true });
+addEventListener('pointerup', event => {
+	if (event.pointerId !== swallowPointer) return;
+	swallowPointer = null;
+	swallowClick = true;
+	event.stopPropagation();
+}, { capture: true });
+addEventListener('click', event => {
+	if (!swallowClick) return;
+	swallowClick = false;
+	event.preventDefault();
+	event.stopPropagation();
+}, { capture: true });
+addEventListener('keydown', event => { if (appKey(event) && !lock.check()) takeOver(event); }, { capture: true });
 applyBoardTexture(settings.board);
 shell.paintSettings(settings);
 

@@ -25,13 +25,13 @@ function browser() {
 	};
 }
 
-test('存档：读、写、清；坏数据与存储不可用时按没有存档处理', () => {
+test('存档：读、写、终局标记；坏数据与存储不可用时按没有存档处理', () => {
 	const tab = browser().open(), slot = createSaveSlot(tab.storage);
-	assert.equal(slot.load(), null);
+	assert.deepEqual([slot.load(), slot.finished], [null, false], '空存档不等于"已下完"');
 	assert.ok(slot.save({ fen: 'start', moves: ['e2e4'] }));
-	assert.deepEqual(slot.load().moves, ['e2e4']);
-	assert.ok(slot.clear());
-	assert.equal(slot.load(), null);
+	assert.deepEqual([slot.load().moves, slot.finished], [['e2e4'], false]);
+	assert.ok(slot.finish());
+	assert.deepEqual([slot.load(), slot.finished], [null, true]);
 	tab.storage.setItem('frostfall.game', '{"fen":1}');
 	assert.equal(slot.load(), null);
 	const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
@@ -55,14 +55,32 @@ test('交接：后接手的页拿到"在下"，先前那页收到通知转为待
 	assert.deepEqual(lost, ['a', 'b'], '重复接手不打扰别人');
 });
 
-test('错过了通知（标签页被冻结等）：held 现读存储，不会误以为自己还在下', () => {
+test('错过了通知（标签页被冻结等）：check 现读存储发现并转为待命；回来接手时知道要重读', () => {
 	const br = browser(), a = br.open(), b = br.open();
-	const la = createTabLock({ storage: a.storage, events: {} });   // A 收不到 storage 事件
+	let lost = 0;
+	const la = createTabLock({ storage: a.storage, events: {}, onLost: () => lost++ });   // A 收不到 storage 事件
 	const lb = createTabLock({ storage: b.storage, events: b.events });
 	la.claim();
 	lb.claim();
-	assert.equal(la.held, false);
+	assert.equal(la.held, true, '缓存还以为在下');
+	assert.equal(la.check(), false, '现读发现已不是');
+	assert.deepEqual([la.held, lost], [false, 1]);
+	assert.equal(la.check(), false);
+	assert.equal(lost, 1, '只通知一次');
 	assert.equal(la.claim(), false, 'A 回来接手时知道要重读存档');
+});
+
+test('某次写入临时失败后，一旦收到别的页的通知就不再"独占"', () => {
+	const br = browser(), a = br.open(), b = br.open();
+	let fail = true, lost = 0;
+	const flaky = { ...a.storage, setItem: (k, v) => { if (fail) throw new Error('QuotaExceededError'); a.storage.setItem(k, v); } };
+	const la = createTabLock({ storage: flaky, events: a.events, onLost: () => lost++ });
+	const lb = createTabLock({ storage: b.storage, events: b.events });
+	la.claim();
+	assert.equal(la.check(), true, '写不进去时算本页在下');
+	fail = false;
+	lb.claim();                                                   // B 接手，A 收到通知
+	assert.deepEqual([la.check(), lost], [false, 1]);
 });
 
 test('交接：别的键变化不影响；存储被整个清空时视为失去', () => {
@@ -80,6 +98,6 @@ test('存储不可用时只有本页，接手照样成功', () => {
 	const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
 	const lock = createTabLock({ storage: broken, events: {} });
 	assert.equal(lock.claim(), false);
-	assert.equal(lock.held, true);
+	assert.deepEqual([lock.held, lock.check()], [true, true]);
 	assert.equal(lock.claim(), true);
 });

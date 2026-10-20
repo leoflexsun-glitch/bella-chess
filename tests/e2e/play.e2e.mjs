@@ -634,6 +634,24 @@ await scenario('多标签页：空闲页面不清掉另一页的对局存档', {
 	assert.equal((await moves(page)).length, 2, '空闲页接着那盘');
 });
 
+// 存储被外部清空（开发者工具"清除存储"、清除站点数据等）：空存档不等于这盘下完了，
+// 本页的对局要保住并重新存上，而不是被当成"在别处结束"丢掉。
+await scenario('多标签页：存储被清空时保住进行中的对局', { width: 1280, height: 800 }, async (page, ctx) => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	const other = await ctx.newPage();
+	await other.goto(URL + '#blank');                    // 同源的另一页清空存储（本页会收到通知）
+	await other.evaluate(() => localStorage.clear());
+	await page.waitForTimeout(200);
+	await click(page, 'g1');                             // 回到本页点一下：接回
+	await page.waitForTimeout(200);
+	assert.equal((await moves(page)).length, 2, '对局还在');
+	assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')))).moves.length, 2, '重新存上');
+});
+
 // 标签页被冻结、从往返缓存恢复等：错过了"别的页接手"的通知。它不能以为自己还在下而写回旧局面，
 // 用户回到它时要重新读出最新局面。
 await scenario('多标签页：错过接手通知的旧页不写存档，回来时重读', { width: 1280, height: 800 }, async page => {
@@ -670,7 +688,11 @@ await scenario('多标签页：同一时刻只有一页在下，切换时接着�
 	await b.goto(URL);
 	await b.waitForTimeout(300);
 	assert.equal((await moves(b)).length, 2, 'B 接着这盘');
-	assert.ok(await page.locator('[data-slot=standby]').isVisible(), 'A 待命');
+	assert.ok(await page.isVisible('#dlg-standby[open]'), 'A 待命');
+	// 在待命的 A 里按修饰键（比如 Alt+Tab 切窗口时先按下的 Alt）：不算回到 A，不接手
+	await page.keyboard.press('Alt');
+	assert.ok(await page.isVisible('#dlg-standby[open]'), '按修饰键不接手');
+	assert.ok(await b.isHidden('#dlg-standby[open]'));
 	// 在 B 接着下；A 待命期间切后台不写存档
 	await click(b, 'g1');
 	await click(b, 'f3');
@@ -680,25 +702,33 @@ await scenario('多标签页：同一时刻只有一页在下，切换时接着�
 	// 回到 A：接手并读出 B 下的两步；B 转为待命
 	await showTab(page);
 	assert.equal((await moves(page)).length, 4, 'A 读出最新局面');
-	assert.ok(await b.locator('[data-slot=standby]').isVisible(), 'B 待命');
-	assert.ok(await page.locator('[data-slot=standby]').isHidden());
+	assert.ok(await b.isVisible('#dlg-standby[open]'), 'B 待命');
+	assert.ok(await page.isHidden('#dlg-standby[open]'));
+	// 在待命的 B 上长按"翻转"再松开：这一下只用来接回，不能把翻转作用到刚读出的局面上（哪怕按得久）
+	const flipBtn = await b.locator('.controls [data-act="flip"]').boundingBox();
+	await b.mouse.move(flipBtn.x + flipBtn.width / 2, flipBtn.y + flipBtn.height / 2);
+	await b.mouse.down();
+	await b.waitForTimeout(900);
+	await b.mouse.up();
+	assert.equal(await b.textContent('#board2d .cf'), 'a', 'B 接回后没有被翻转');
+	await showTab(page);                                 // 再回到 A
 	// A 认输：清档。B 再接手：存档已空，回到新对局，不会复活已结束的局
 	await page.click('[data-act="resign"]');
 	await page.click('[data-act="resign"]');
 	await page.waitForSelector('[data-slot=result]:not([hidden])');
-	assert.equal(await slot(), null, '认输后清档');
+	assert.deepEqual(await slot(), { ended: true }, '认输后存档标为已下完');
 	const btn = await b.locator('[data-act="resume"]').boundingBox();   // 按下即接手（随即弹出新对局），按坐标点
 	await b.mouse.click(btn.x + btn.width / 2, btn.y + btn.height / 2);
 	assert.ok(await b.isVisible('#dlg-new[open]'), 'B 看到可开新局');
 	await hideTab(b);
-	assert.equal(await slot(), null, '已结束的局不会被写回');
+	assert.deepEqual(await slot(), { ended: true }, '已结束的局不会被写回');
 	// 回到 A：存档已空，A 这局本来就结束了——留着结算与棋谱，不被清掉
 	await hideTab(page);
 	await showTab(page);
 	assert.ok(await page.isVisible('[data-slot=result]:not([hidden])'), 'A 的结算还在');
 	assert.equal((await moves(page)).length, 4, 'A 的棋谱还在');
 	await page.keyboard.press('f');                      // 终局后翻转：不能把已结束的局写回存档
-	assert.equal(await slot(), null, '终局后翻转不写回');
+	assert.deepEqual(await slot(), { ended: true }, '终局后翻转不写回');
 });
 
 // 系统开了"减少动态效果"：特效不显示，被吃棋子不淡出，结算卡不浮起。

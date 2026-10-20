@@ -120,9 +120,9 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 }
 .board-col { width: var(--board); flex: none; display: flex; flex-direction: column; gap: 8px; }
 .board-wrap { position: relative; width: 100%; aspect-ratio: 1; border-radius: 8px; box-shadow: var(--shadow); }
-/* 待命遮罩：这盘棋在另一个窗口里下，本窗口暂不可用（盖住整页，3D 视图里也看得到）。 */
-.standby { position: fixed; inset: 0; z-index: 250; display: grid; place-content: center; justify-items: center; gap: 14px; padding: 24px; text-align: center; background: color-mix(in srgb, var(--bg) 84%, transparent); backdrop-filter: blur(3px); font-size: 15px; color: var(--text); }
-.standby p { margin: 0; }
+/* 待命提示：这盘棋在另一个窗口里下。 */
+dialog.standby { text-align: center; }
+dialog.standby p { margin: 4px 0 16px; font-size: 15px; }
 
 .player { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 2px; }
 .avatar { width: 36px; height: 36px; border-radius: 10px; background-color: var(--card); box-shadow: var(--shadow); background-size: 86%; background-position: center; flex: none; }
