@@ -157,6 +157,18 @@ test('还开着的旧版页面接着下同一局：再次并入时并到上次�
 	assert.deepEqual(list.map(e => e.game.moves.length), [4]);
 });
 
+test('旧版存档并入时写不进去：旧位不删；旧版的"已下完"标记不动', () => {
+	const local = memory();
+	local.setItem('frostfall.game', JSON.stringify(game(3)));
+	const full = { get length() { return local.length; }, key: i => local.key(i), getItem: k => local.getItem(k), removeItem: k => local.removeItem(k),
+		setItem: (k, v) => { if (k.startsWith('frostfall.game.')) throw new Error('quota'); local.setItem(k, v); } };
+	createSaveSlots({ storage: full, session: memory() });
+	assert.equal(JSON.parse(local.getItem('frostfall.game')).moves.length, 3);
+	local.setItem('frostfall.game', '{"ended":true}');
+	createSaveSlots({ storage: local, session: memory() });
+	assert.equal(local.getItem('frostfall.game'), '{"ended":true}');
+});
+
 test('存储不可用：不报错，按没有存档处理', () => {
 	const broken = { get length() { throw new Error('denied'); }, key() { throw new Error('denied'); }, getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
 	const a = createSaveSlots({ storage: broken, session: broken });

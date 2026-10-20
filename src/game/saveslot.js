@@ -32,14 +32,13 @@ export function createSaveSlots({ storage, session, now = Date.now } = {}) {
 
 	// 旧版本只有一个存档位：挪成列表里的一条。还开着的旧版页面会接着写它（旧版的"谁在下"标记不碰，免得那页以为被接手而停下）：
 	// 同一局（起始局面、执子相同，着法接着上次挪来的往下走）并到上次那条，别的局另起一条，谁也不覆盖谁。
-	const legacy = store.get('frostfall.game');
-	if (legacy !== null) {
-		if (valid(legacy)) {
-			const same = all().find(({ key: k, game: g }) => k.startsWith(KEY_PREFIX + 'legacy') && g.fen === legacy.fen && g.human === legacy.human
-				&& legacy.moves.join().startsWith(g.moves.join()));
-			store.set(same?.key ?? KEY_PREFIX + 'legacy' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), { ...legacy, savedAt: legacy.savedAt ?? now() });
-		}
-		store.set('frostfall.game', null);
+	// 写进去了才删旧位；旧版的"已下完"标记（不是对局）留着，还开着的旧版页面靠它知道这局已结束。
+	const legacy = valid(store.get('frostfall.game'));
+	if (legacy) {
+		const same = all().find(({ key: k, game: g }) => k.startsWith(KEY_PREFIX + 'legacy') && g.fen === legacy.fen && g.human === legacy.human
+			&& legacy.moves.join().startsWith(g.moves.join()));
+		const moved = store.set(same?.key ?? KEY_PREFIX + 'legacy' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), { ...legacy, savedAt: legacy.savedAt ?? now() });
+		if (moved) store.set('frostfall.game', null);
 	}
 
 	return {
