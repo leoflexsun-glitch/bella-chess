@@ -81,7 +81,11 @@ const hideTab = page => page.evaluate(() => {
 	Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
 	document.dispatchEvent(new Event('visibilitychange'));
 });
-const showTab = page => page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); });
+const showTab = page => page.evaluate(() => {
+	delete document.hidden;
+	document.dispatchEvent(new Event('visibilitychange'));
+	dispatchEvent(new Event('focus'));                   // 切到一个标签页，它同时获得焦点
+});
 
 // 一盘 40 个半步、未终局的对局（固定生成），测试长棋谱用。
 const LONG_GAME = [
@@ -496,6 +500,61 @@ await scenario('多标签页：结束后待命，回来悔棋接着下', { width
 	await click(page, 'g1');
 	await click(page, 'g2');                             // 换一步不将杀的
 	await waitMoves(page, 2);                            // 电脑照常应着
+});
+
+// 两个窗口叠着，后面那个只是露出来（变为可见，但没有焦点）：不该把棋接走。
+// 待命提示被关掉（安卓返回手势等，不经过按键）：视为要用这一页，接回。
+await scenario('多标签页：窗口只是露出来不接手；关掉待命提示即接回', { width: 1280, height: 800 }, async (page, ctx) => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	const b = await ctx.newPage();
+	await b.goto(URL);                                   // B 打开并接手；A 待命
+	await b.waitForTimeout(200);
+	await page.evaluate(() => document.getElementById('dlg-standby').close());   // A 的待命提示被关掉
+	await page.waitForTimeout(200);
+	assert.ok(await b.isVisible('#dlg-standby[open]'), 'A 接回，B 转为待命');
+	await b.evaluate(() => {                             // B 露出来，但焦点还在 A
+		document.hasFocus = () => false;
+		Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+		document.dispatchEvent(new Event('visibilitychange'));
+		delete document.hidden;
+		document.dispatchEvent(new Event('visibilitychange'));
+	});
+	await page.waitForTimeout(200);
+	assert.ok(await page.isHidden('#dlg-standby[open]'), '只是露出来的 B 不接手，A 照常下');
+	await click(page, 'g1');
+	await click(page, 'f3');
+	await waitMoves(page, 4);
+});
+
+// 在本页里清空了存储（开发者工具等，本页收不到通知）：下一步存档时发现"谁在下"空了，重新登记接着下，不转待命。
+// 已结束的局在存储被（别的页）清空后，要重新写上"已结束"，免得旧副本被当成进行中的局复活。
+await scenario('存储被清空：本页里清空也照常下；已结束的局重新标记', { width: 1280, height: 800 }, async (page, ctx) => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	await page.evaluate(() => localStorage.clear());
+	await click(page, 'g1');
+	await click(page, 'f3');
+	await waitMoves(page, 4);                            // 电脑照常应着
+	assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')))).moves.length, 4);
+	// 提示箭头在认输后不留在棋盘上
+	await page.keyboard.press('h');
+	await page.waitForSelector('#board2d .b2d-arrows line', { state: 'attached', timeout: 8000 });
+	await page.click('[data-act="resign"]');
+	await page.click('[data-act="resign"]');
+	await page.waitForSelector('[data-slot=result]:not([hidden])');
+	assert.equal(await page.locator('#board2d .b2d-arrows line, #board2d .mk.hint-to').count(), 0, '终局后不留提示箭头');
+	const other = await ctx.newPage();
+	await other.goto(URL + 'blank');
+	await other.evaluate(() => localStorage.clear());
+	await page.waitForTimeout(200);
+	assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game'))), { ended: true }, '重新写上"已结束"');
 });
 
 // 两边都没有对局时，在不"在下"的那页里点按钮：没有什么可接回的，这一下照常生效。

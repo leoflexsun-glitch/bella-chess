@@ -126,6 +126,7 @@ const match = createMatch({
 	onThink: () => refresh(),
 	onEnd: over => {
 		clearSelection();
+		hintArrow = null;          // 终局后不再留着提示箭头
 		syncClock();
 		if (playing && lock.check()) saveSlot.finish();
 		const result = outcome(over);
@@ -234,7 +235,11 @@ function outcome(over) {
 // 存档：同一时刻只有一个标签页在下这盘棋（tablock.js），只有它写。别的页接手时本页待命（standBy），
 // 用户回到本页时接回，并在需要时重新读出存档（resume）。
 const saveSlot = createSaveSlot();
-const lock = createTabLock({ onLost: standBy, onCleared: () => saveGame() });
+// 存储被清空后重新存上：进行中的局重新存档；已结束的局重新写上"已结束"，免得待命页把旧副本当成进行中的局写回。
+const lock = createTabLock({
+	onLost: standBy,
+	onCleared: () => { if (playing && match.state.over) saveSlot.finish(); else saveGame(); }
+});
 let gameNo = 0;            // 每开一局、每恢复一次存档加一（升变选择据此作废）
 
 // 写存档：只写本页在下、仍在进行的对局。已结束的局由 onEnd 写入终局标记，不能再写回（否则会被当成进行中恢复）。
@@ -292,7 +297,7 @@ function validSave(saved) {
 	try {
 		return (saved.human === WHITE || saved.human === BLACK)
 			&& Object.hasOwn(LEVEL_TEXT, saved.level)
-			&& saved.moves.every(m => typeof m === 'string')
+			&& saved.moves.every(m => typeof m === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(m))
 			&& prepare(saved.fen).errors.length === 0;
 	} catch {
 		return false;
@@ -586,12 +591,17 @@ if (!haptics.supported) shell.hideSetting('haptics');
 
 // 切到后台或关页：存下已用时长，再按可见性停表/续表；切回来时接回这盘棋。
 // 关页时两个事件都会触发，重复存一次无妨。
+// 切到前台且窗口有焦点（真在用这一页）才接手：两个窗口叠着时，后面那个只是露出来，不该把棋接走。
+// 没有焦点时，等它获得焦点、或用户在里面点按/按键再接。
 document.addEventListener('visibilitychange', () => {
 	if (document.hidden) saveGame();
-	else resume();
+	else if (document.hasFocus()) resume();
 	syncClock();
 });
+window.addEventListener('focus', () => { if (!document.hidden) resume(); });
 window.addEventListener('pagehide', saveGame);
+// 待命提示被返回手势、Esc 等关掉：说明用户要用这一页，接回（否则看着正常，电脑却不走）。
+document.getElementById('dlg-standby').addEventListener('close', () => { if (!lock.held) resume(); });
 // 两个窗口并排时，切到另一个窗口不会触发 visibilitychange：失焦时也存一次用时，免得被接手时丢掉。
 window.addEventListener('blur', saveGame);
 // 对局进行中、窗口有焦点时每 15 秒存一次用时：别的窗口抢先接手时（失焦存档与对方接手跨进程、先后不定）最多丢 15 秒。
@@ -638,8 +648,9 @@ addEventListener('keydown', event => { if (!event.repeat && appKey(event) && !lo
 applyBoardTexture(settings.board);
 shell.paintSettings(settings);
 
-// 在后台打开的标签页（按住 Ctrl 点开、浏览器恢复会话）先不接手，用户切过来时再接（见 resume），免得打断正在下的那页。
-const background = document.hidden;
+// 在后台打开的标签页（按住 Ctrl 点开、浏览器恢复会话），或可见但没有焦点的窗口，先不接手；
+// 用户切过来、点进来时再接（见 resume），免得打断正在下的那页。
+const background = document.hidden || !document.hasFocus();
 if (!background) lock.claim();
 const saved = background ? null : saveSlot.load();
 if (saved && restoreGame(saved)) {

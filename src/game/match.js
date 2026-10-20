@@ -213,7 +213,9 @@ export function createMatch(hooks = {}) {
 			reset({ human, level, fen });
 			for (const uci of moves) {
 				if (state.over) break;
-				const move = findMove(state.pos, parseSquare(uci.slice(0, 2)), parseSquare(uci.slice(2, 4)), LETTER_PROMO[uci[4]] || QUEEN);
+				const from = parseSquare(uci.slice(0, 2)), to = parseSquare(uci.slice(2, 4));
+				if (from < 0 || to < 0) break;   // 格子写错时 findMove 会把 -1 当成"任意格"，配出别的着法
+				const move = findMove(state.pos, from, to, LETTER_PROMO[uci[4]] || QUEEN);
 				if (!move) break;
 				commit(move, {}, true);
 			}

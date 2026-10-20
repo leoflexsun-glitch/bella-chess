@@ -36,6 +36,12 @@ export function createTabLock({ storage, events = globalThis, onLost, onCleared 
 	return {
 		get held() { return held; },
 		check() {
+			if (held && !solo && store.get(KEY) === null) {
+				// "谁在下"被清掉了（本页里清空了存储，收不到通知）：没有别的页接手，重新登记、接着下。
+				store.set(KEY, tabId);
+				onCleared?.();
+				return true;
+			}
 			const now = owned();
 			if (held && !now) lose();
 			return now;

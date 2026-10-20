@@ -181,3 +181,9 @@ test('待命中下完的局，回来"悔棋接着下"后电脑照常应着', () 
 	m.play(parseSquare('e2'), parseSquare('e4'));
 	assert.equal(posted.length, 1, '电脑应开始思考');
 });
+
+test('恢复存档时遇到格子写错的着法就停下，不会配出别的着法', () => {
+	const m = createMatch();
+	m.restore({ human: WHITE, level: 'club', fen: '4k3/8/8/8/8/8/4P3/4K3 w - - 0 1', moves: ['x2e4', 'e2e4'] });
+	assert.equal(m.state.history.length, 0);
+});
