@@ -16,6 +16,8 @@ function memory() {
 const game = n => ({ fen: 'start', moves: Array(n).fill('e2e4') });
 let t = 0;
 const tick = () => ++t;                 // 每次存档时间各不相同
+const DAY = 86400000;
+const days = () => (t += 31 * DAY);    // 每次存档隔一个多月
 
 test('两页各下各的：互不覆盖，各自刷新回到自己那局', () => {
 	const local = memory(), sa = memory(), sb = memory();
@@ -53,7 +55,7 @@ test('下完从列表删掉；悔棋接着下再存回来', () => {
 	assert.equal(createSaveSlots({ storage: local, session: memory() }).list().length, 1);
 });
 
-test('最多留 8 局；坏数据不列出；旧版单一存档并入列表', () => {
+test('超过 8 局时删掉一个月没动过的；坏数据不列出；旧版单一存档并入列表', () => {
 	const local = memory();
 	local.setItem('frostfall.game', JSON.stringify(game(7)));
 	local.setItem('frostfall.active', '"x"');
@@ -62,9 +64,10 @@ test('最多留 8 局；坏数据不列出；旧版单一存档并入列表', ()
 	assert.deepEqual(a.list().map(e => e.game.moves.length), [7]);
 	assert.equal(local.getItem('frostfall.game'), null);
 	assert.equal(local.getItem('frostfall.active'), null);
-	for (let i = 0; i < 10; i++) { a.begin(); a.save(game(i + 1)); }
+	const b = createSaveSlots({ storage: local, session: memory(), now: days });
+	for (let i = 0; i < 10; i++) { b.begin(); b.save(game(i + 1)); }
 	const left = createSaveSlots({ storage: local, session: memory() }).list().map(e => e.game.moves.length);
-	assert.deepEqual(left, [10, 9, 8, 7, 6, 5, 4, 3, 2], '留下最新的：本页这局 + 之前 8 局');
+	assert.deepEqual(left, [10, 9, 8, 7, 6, 5, 4, 3, 2], '留下最新的：本页这局 + 之前 8 局（旧版那条也已过期删掉）');
 });
 
 test('挪存档时新键写不进去：沿用原条，不删', () => {
@@ -98,6 +101,16 @@ test('别的页开了就关、一步没走的空局：不挤掉没下完的局',
 	const left = createSaveSlots({ storage: local, session: memory() }).list();
 	assert.deepEqual(left.filter(e => e.game.moves.length).map(e => e.game.moves.length), [8, 7, 6, 5, 4, 3, 2, 1]);
 	assert.ok(left.filter(e => !e.game.moves.length).length <= 8, '空局也限量');
+});
+
+test('超过 8 局但最近动过的不删：可能正在别的页里下（后台页被回收后要靠它恢复）', () => {
+	const local = memory(), sa = memory();
+	const a = createSaveSlots({ storage: local, session: sa, now: tick });
+	a.begin(); a.save(game(1));                          // A 页这局，之后一直在后台
+	const b = createSaveSlots({ storage: local, session: memory(), now: tick });
+	for (let i = 0; i < 10; i++) { b.begin(); b.save(game(i + 2)); }
+	const a2 = createSaveSlots({ storage: local, session: sa });   // A 页被回收后重新打开
+	assert.equal(a2.get(a2.previous)?.moves.length, 1);
 });
 
 test('选中最旧的那局接着下：不会马上被当成最旧的删掉', () => {

@@ -7,7 +7,8 @@ import { jsonStore } from '../core/store.js';
 
 const KEY_PREFIX = 'frostfall.game.';
 const CURRENT = 'frostfall.current';
-const KEEP = 8;            // 最多留几局没下完的；更早的自动删掉
+const KEEP = 8;            // 没下完的局超过这么多时，删掉更早且一个月没动过的
+const STALE = 30 * 86400000;
 
 const valid = g => g && typeof g.fen === 'string' && Array.isArray(g.moves) ? g : null;
 
@@ -54,10 +55,10 @@ export function createSaveSlots({ storage, session, now = Date.now } = {}) {
 				tab.set(CURRENT, null);
 			}
 			// 有棋步的局与一步没走的局（开了就关掉的页留下的，列表里不显示）分开限量：后者不能挤掉前者。
+			// 有棋步的局只删一个月没动过的：最近的可能正在别的页里下（后台页面随时会被浏览器回收，回来时要靠存档恢复）。
 			const others = all().filter(e => e.key !== key);
-			for (const group of [others.filter(e => e.game.moves.length), others.filter(e => !e.game.moves.length)]) {
-				for (const e of group.slice(KEEP)) store.set(e.key, null);
-			}
+			const played = others.filter(e => e.game.moves.length).slice(KEEP).filter(e => now() - (e.game.savedAt ?? 0) > STALE);
+			for (const e of [...played, ...others.filter(e => !e.game.moves.length).slice(KEEP)]) store.set(e.key, null);
 		},
 		save(snapshot) {
 			if (!key) return false;
