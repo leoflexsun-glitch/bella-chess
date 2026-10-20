@@ -87,6 +87,19 @@ test('一步没走的局不留：反复开新局不会挤掉没下完的局', ()
 	assert.deepEqual(left.filter(e => e.game.moves.length).map(e => e.game.moves.length), [8, 7, 6, 5, 4, 3, 2, 1]);
 });
 
+test('别的页开了就关、一步没走的空局：不挤掉没下完的局', () => {
+	const local = memory(), a = createSaveSlots({ storage: local, session: memory(), now: tick });
+	for (let i = 0; i < 8; i++) { a.begin(); a.save(game(i + 1)); }
+	for (let i = 0; i < 10; i++) {                       // 每次新开一页、开局后不走就关掉
+		const t = createSaveSlots({ storage: local, session: memory(), now: tick });
+		t.begin(); t.save(game(0));
+	}
+	a.begin();
+	const left = createSaveSlots({ storage: local, session: memory() }).list();
+	assert.deepEqual(left.filter(e => e.game.moves.length).map(e => e.game.moves.length), [8, 7, 6, 5, 4, 3, 2, 1]);
+	assert.ok(left.filter(e => !e.game.moves.length).length <= 8, '空局也限量');
+});
+
 test('选中最旧的那局接着下：不会马上被当成最旧的删掉', () => {
 	const local = memory(), a = createSaveSlots({ storage: local, session: memory(), now: tick });
 	for (let i = 0; i < 9; i++) { a.begin(); a.save(game(i + 1)); }

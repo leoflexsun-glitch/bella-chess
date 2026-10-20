@@ -53,7 +53,11 @@ export function createSaveSlots({ storage, session, now = Date.now } = {}) {
 			} else {
 				tab.set(CURRENT, null);
 			}
-			for (const e of all().filter(e => e.key !== key).slice(KEEP)) store.set(e.key, null);
+			// 有棋步的局与一步没走的局（开了就关掉的页留下的，列表里不显示）分开限量：后者不能挤掉前者。
+			const others = all().filter(e => e.key !== key);
+			for (const group of [others.filter(e => e.game.moves.length), others.filter(e => !e.game.moves.length)]) {
+				for (const e of group.slice(KEEP)) store.set(e.key, null);
+			}
 		},
 		save(snapshot) {
 			if (!key) return false;
