@@ -54,3 +54,13 @@ test('总移动距离是最小的（与穷举比对 300 组随机局面）', () 
 		assert.equal(r.moves.length, Math.min(have.length, need.length));
 	}
 });
+
+test('同种棋子数量异常（损坏的存档）时退回就近配对，不卡住', () => {
+	const sqs = [];
+	for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) sqs.push(r * 16 + f);
+	const t = Date.now();
+	// 每边 30 颗：按子集动态规划要 2³⁰ 个状态（分配不出来）；应退回就近配对
+	const r = pairPieces(sqs.slice(0, 30).map(sq => ({ sq, code: 'wN' })), sqs.slice(30, 60).map(sq => ({ sq, code: 'wN' })));
+	assert.equal(r.moves.length, 30);
+	assert.ok(Date.now() - t < 500, '应很快返回');
+});

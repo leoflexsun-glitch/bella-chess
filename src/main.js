@@ -65,7 +65,7 @@ const board2d = createBoard2d(document.getElementById('board2d'), intents);
 const view2d = {
 	kind: '2d',
 	show(pos) { board2d.setPosition(pos); },
-	hide() { board2d.cancelPromotion(); },
+	hide() { board2d.cancelPromotion(); },   // 无待选升变时是空操作
 	setPosition: (pos, opts) => board2d.setPosition(pos, opts),
 	pulse: (sq, kind) => board2d.pulse(sq, kind),
 	playMove: (move, after) => board2d.playMove(move, after),
@@ -86,6 +86,7 @@ let view = view2d;
 
 const match = createMatch({
 	onReset: reason => {
+		resignArmed = 0;           // "再按一次认输"只对当前这局有效
 		clearSelection();
 		hintArrow = null;
 		reviewPly = null;
@@ -235,10 +236,13 @@ const lock = createTabLock({ onLost: standBy });
 let gameNo = 0;            // 每开一局、每恢复一次存档加一（升变选择据此作废）
 
 // 写存档：只写本页在下、仍在进行的对局。已结束的局由 onEnd 写入终局标记，不能再写回（否则会被当成进行中恢复）。
-function saveGame() {
-	if (!inProgress() || !lock.check()) return;
+function currentSnapshot() {
 	const s = match.state;
-	saveSlot.save({ fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() });
+	return { fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() };
+}
+
+function saveGame() {
+	if (inProgress() && lock.check()) saveSlot.save(currentSnapshot());
 }
 
 // 别的标签页接手了这盘棋：本页停下电脑思考与计时，不再写存档。
@@ -265,10 +269,12 @@ function resume() {
 		playing = false;
 		match.newGame();
 		if (!editor.isOpen && !photo.isOpen) shell.open('dlg-new');   // 正在摆棋、拍照时不打扰
-	} else {
+	} else if (inProgress()) {
+		// 存档为空（比如存储被清空）：以本页为准。重新"恢复"一遍本页的局面——
+		// 待命时停下的电脑思考与计时随之恢复——再存上。
+		restoreGame(currentSnapshot());
 		saveGame();
-		refresh();
-	}
+	} else refresh();
 }
 
 function restoreGame(saved) {
@@ -578,6 +584,7 @@ const takeOver = event => {
 };
 addEventListener('pointerdown', event => {
 	swallowClick = false;
+	swallowPointer = null;
 	if (lock.check()) return;
 	swallowPointer = event.pointerId;
 	takeOver(event);
@@ -585,9 +592,11 @@ addEventListener('pointerdown', event => {
 addEventListener('pointerup', event => {
 	if (event.pointerId !== swallowPointer) return;
 	swallowPointer = null;
-	swallowClick = true;
+	swallowClick = true;                 // click 紧随抬起；若没有 click（比如拖走了），过一会儿自动失效
+	setTimeout(() => { swallowClick = false; }, 400);
 	event.stopPropagation();
 }, { capture: true });
+addEventListener('pointercancel', event => { if (event.pointerId === swallowPointer) swallowPointer = null; }, { capture: true });
 addEventListener('click', event => {
 	if (!swallowClick) return;
 	swallowClick = false;
@@ -608,7 +617,8 @@ if (saved) {
 } else {
 	view.setPosition(match.state.pos);
 	refresh();
-	if (!background) shell.open('dlg-new');
+	// 后台打开的页也先打开新对局对话框：用户切过来时，若接回了一盘对局，resume 会关掉它
+	shell.open('dlg-new');
 }
 if (settings.view === '3d') setView('3d');
 

@@ -144,11 +144,11 @@ export function createMatch(hooks = {}) {
 
 	// 终局判定；返回结局或 null。
 	function verdict(mover, seen) {
-		const result = status(state.pos);
-		if (result === 'checkmate') return { reason: 'checkmate', winner: mover };
-		if (result === 'stalemate') return { reason: 'stalemate', winner: null };
-		if (result === 'fifty') return { reason: 'fifty-move rule', winner: null };
-		if (result === 'material') return { reason: 'insufficient material', winner: null };
+		const st = status(state.pos);
+		if (st === 'checkmate') return { reason: 'checkmate', winner: mover };
+		if (st === 'stalemate') return { reason: 'stalemate', winner: null };
+		if (st === 'fifty') return { reason: 'fifty-move rule', winner: null };
+		if (st === 'material') return { reason: 'insufficient material', winner: null };
 		if (seen >= 3) return { reason: 'threefold repetition', winner: null };
 		return null;
 	}

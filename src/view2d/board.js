@@ -398,6 +398,7 @@ export function createBoard2d(host, intents = {}) {
 		askPromotion,
 		// 收起升变选择，并把停在底线等选择的兵放回它的格子。
 		cancelPromotion() {
+			if (!promoFinish && !parked) return;
 			promoFinish?.(null);
 			parked = null;
 			for (const [sq, el] of pieces) place(el, sq);

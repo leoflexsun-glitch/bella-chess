@@ -20,6 +20,8 @@ const server = createServer(async (req, res) => {
 		else res.writeHead(404).end();
 		return;
 	}
+	// 同源的空白页：测试里用来改存储，又不运行本应用
+	if (req.url === '/blank') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><title>blank</title>'); return; }
 	if (req.url !== '/' && !req.url.startsWith('/index.html')) { res.writeHead(404).end(); return; }
 	res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(await readFile(path.join(root, 'index.html')));
 });
@@ -452,6 +454,20 @@ await scenario('后台标签页打开存档：切到前台前不计时', { width
 	assert.match(await page.textContent('[data-slot=result-stats]'), /用时 0:0[01] /, '后台那 3 秒不应计入');
 });
 
+// 后台打开、又没有存档的页：用户切过来时要看到新对局对话框，而不是一个空棋盘。
+await scenario('后台标签页打开（无存档）：切过来时看到新对局', { width: 1280, height: 800 }, async page => {
+	await page.addInitScript(() => {
+		if (!localStorage.getItem('test.bg')) return;
+		Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+		window.becomeVisible = () => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); };
+	});
+	await fresh(page);
+	await page.evaluate(() => localStorage.setItem('test.bg', '1'));
+	await page.reload();
+	await page.evaluate(() => window.becomeVisible());
+	assert.ok(await page.isVisible('#dlg-new[open]'));
+});
+
 // 浏览器禁用了 Web Audio：静音照常下棋，电脑照常应答。
 await scenario('没有声音也能下：音频不可用时不影响走子', { width: 1280, height: 800 }, async page => {
 	await page.addInitScript(() => {
@@ -638,18 +654,35 @@ await scenario('多标签页：空闲页面不清掉另一页的对局存档', {
 // 本页的对局要保住并重新存上，而不是被当成"在别处结束"丢掉。
 await scenario('多标签页：存储被清空时保住进行中的对局', { width: 1280, height: 800 }, async (page, ctx) => {
 	await fresh(page);
+	const other = await ctx.newPage();
+	await other.goto(URL + 'blank');                     // 同源、但不运行本应用的空白页，稍后用它清空存储
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');                             // 电脑开始思考……
+	await other.evaluate(() => localStorage.clear());    // ……这时存储被清空：本页转为待命，思考被停下
+	await page.waitForTimeout(200);
+	await click(page, 'h8');                             // 回到本页点一下：接回
+	await waitMoves(page, 2);                            // 电脑照常应着，不会卡在它的回合
+	assert.equal((await moves(page))[0], 'e4', '对局还在');
+	assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')))).moves.length, 2, '重新存上');
+});
+
+// "再按一次认输"只对当前这局有效：按了一次又改主意去开新局，新局里按一次不能直接认输。
+await scenario('认输确认不跨局', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
 	await page.click('#dlg-new [data-act="start"]');
 	await click(page, 'e2');
 	await click(page, 'e4');
 	await waitMoves(page, 2);
-	const other = await ctx.newPage();
-	await other.goto(URL + '#blank');                    // 同源的另一页清空存储（本页会收到通知）
-	await other.evaluate(() => localStorage.clear());
+	await page.click('[data-act="resign"]');             // 按了一次（待确认）
+	await page.click('.topbar [data-act="new"]');
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'd2');
+	await click(page, 'd4');
+	await waitMoves(page, 2);
+	await page.click('[data-act="resign"]');             // 新局里只按一次
 	await page.waitForTimeout(200);
-	await click(page, 'g1');                             // 回到本页点一下：接回
-	await page.waitForTimeout(200);
-	assert.equal((await moves(page)).length, 2, '对局还在');
-	assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')))).moves.length, 2, '重新存上');
+	assert.ok(await page.isHidden('[data-slot=result]:not([hidden])'), '不应直接认输');
 });
 
 // 标签页被冻结、从往返缓存恢复等：错过了"别的页接手"的通知。它不能以为自己还在下而写回旧局面，
