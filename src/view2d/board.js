@@ -8,7 +8,7 @@
 //
 // 格子编号沿用引擎的 0x88：a8 = 0，h1 = 119。
 
-import { WHITE, KING, QUEEN, ROOK, BISHOP, KNIGHT, KCASTLE, QCASTLE, EP, typeOf, colorOf } from '../chess/engine.js';
+import { WHITE, KING, QUEEN, ROOK, BISHOP, KNIGHT, KCASTLE, QCASTLE, EP, typeOf, colorOf, onBoard } from '../chess/engine.js';
 import { pairPieces } from './pairing.js';
 
 const LETTER = { 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
@@ -64,6 +64,11 @@ export function createBoard2d(host, intents = {}) {
 		el.dataset.p = code;
 	}
 
+	// 逐个遍历盘上棋子：fn(sq, piece)。
+	function eachPiece(fn) {
+		for (let sq = 0; sq < 128; sq++) if (onBoard(sq) && board[sq]) fn(sq, board[sq]);
+	}
+
 	function makePiece(piece, sq) {
 		const el = document.createElement('i');
 		setCode(el, pieceCode(piece));
@@ -76,12 +81,11 @@ export function createBoard2d(host, intents = {}) {
 		cancelDrag();
 		const next = new Map();
 		const frag = document.createDocumentFragment();
-		for (let sq = 0; sq < 128; sq++) {
-			if (sq & 0x88 || !board[sq]) continue;
-			const el = makePiece(board[sq], sq);
+		eachPiece((sq, piece) => {
+			const el = makePiece(piece, sq);
 			next.set(sq, el);
 			frag.append(el);
-		}
+		});
 		piecesLayer.replaceChildren(frag);
 		pieces = next;
 	}
@@ -90,19 +94,17 @@ export function createBoard2d(host, intents = {}) {
 	// 淡出的、对不上的删掉，缺的补上。结果同样只取决于 board。
 	function reconcile() {
 		const next = new Map();
-		for (let sq = 0; sq < 128; sq++) {
-			if (sq & 0x88 || !board[sq]) continue;
-			const code = pieceCode(board[sq]);
+		eachPiece((sq, piece) => {
 			let el = pieces.get(sq);
-			if (el?.isConnected && el.dataset.p === code && !el.classList.contains('gone')) {
+			if (el?.isConnected && el.dataset.p === pieceCode(piece) && !el.classList.contains('gone')) {
 				el.classList.remove('moving', 'appear');
 				place(el, sq);
 			} else {
-				el = makePiece(board[sq], sq);
+				el = makePiece(piece, sq);
 				piecesLayer.append(el);
 			}
 			next.set(sq, el);
-		}
+		});
 		const keep = new Set(next.values());
 		for (const el of [...piecesLayer.children]) if (!keep.has(el)) el.remove();
 		pieces = next;
@@ -176,9 +178,8 @@ export function createBoard2d(host, intents = {}) {
 		const left = new Map(pieces);
 		const nextMap = new Map();
 		const need = [];
-		for (let sq = 0; sq < 128; sq++) {
-			if (sq & 0x88 || !board[sq]) continue;
-			const code = pieceCode(board[sq]);
+		eachPiece((sq, piece) => {
+			const code = pieceCode(piece);
 			const el = left.get(sq);
 			if (el && el.dataset.p === code) {
 				// 原位不动的也重新定位一次：升变待选时兵画在底线，但记录仍在原格。
@@ -186,7 +187,7 @@ export function createBoard2d(host, intents = {}) {
 				nextMap.set(sq, el);
 				left.delete(sq);
 			} else need.push({ sq, code });
-		}
+		});
 		const { moves, appear, vanish } = pairPieces([...left].map(([sq, el]) => ({ sq, code: el.dataset.p })), need);
 		for (const [from, to] of moves) {
 			const el = left.get(from);
@@ -205,13 +206,12 @@ export function createBoard2d(host, intents = {}) {
 		settle();
 	}
 
-	function settle(after) {
+	function settle() {
 		clearTimeout(settleTimer);
 		settleTimer = setTimeout(() => {
 			// 动画只是视觉；落定后按真实局面对账一次，任何竞态都留不下残子。
 			// 升变选择打开时兵停在底线等选择，先不对账：选完走子或取消时会重新同步。
 			if (promoLayer.hidden) reconcile();
-			after?.();
 		}, ANIM_MS + 40);
 	}
 
@@ -391,7 +391,11 @@ export function createBoard2d(host, intents = {}) {
 		get flipped() { return flipped; },
 
 		askPromotion,
-		cancelPromotion() { promoFinish?.(null); },
+		// 收起升变选择，并把停在底线等选择的兵放回它的格子。
+		cancelPromotion() {
+			promoFinish?.(null);
+			for (const [sq, el] of pieces) place(el, sq);
+		},
 		get dragging() { return Boolean(drag); }
 	};
 }

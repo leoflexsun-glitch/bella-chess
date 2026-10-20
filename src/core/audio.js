@@ -45,7 +45,8 @@ export function createAudio() {
 			}
 		}
 		// 'suspended'（未经用户手势）或 iOS 来电等打断后的 'interrupted'：都要重新拉起。
-		if (ctx.state !== 'running') ctx.resume().catch(() => {});
+		// resume 在个别旧内核里会直接抛错或不返回 Promise，一并兜住。
+		if (ctx.state !== 'running') Promise.resolve().then(() => ctx.resume()).catch(() => {});
 		return ctx;
 	};
 
@@ -109,10 +110,7 @@ export function createAudio() {
 		});
 	}
 
-	return {
-		set enabled(v) { on = v; },
-		get enabled() { return on; },
-
+	const sounds = {
 		lift() { knock({ pitch: 1.35, weight: 0.3, gain: 0.16 }); },
 		place() { knock({ gain: 0.55 }); },
 		// 吃子：先一记更沉的落子，紧接着被吃棋子离盘的轻响。
@@ -129,4 +127,14 @@ export function createAudio() {
 		},
 		deny() { knock({ pitch: 0.55, weight: 0.4, gain: 0.22 }); }
 	};
+
+	// 音效只是点缀：任何 Web Audio 异常都在这里吞掉，绝不打断走子流程（音效在对局回调里播放）。
+	const api = {
+		set enabled(v) { on = v; },
+		get enabled() { return on; }
+	};
+	for (const [name, play] of Object.entries(sounds)) {
+		api[name] = (...args) => { try { play(...args); } catch { /* 静音继续 */ } };
+	}
+	return api;
 }

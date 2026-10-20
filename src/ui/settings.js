@@ -63,32 +63,3 @@ export function loadSettings() {
 export function saveSettings(settings) {
 	try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch { /* 存不了就只在本次会话生效 */ }
 }
-
-// 进行中的对局：刷新或关掉标签页后能接着下。
-const GAME = 'frostfall.game';
-
-// 存档位只有一个，几个标签页共用。OWNER 记最近一次以真实操作写入它的标签页，
-// 各页据此判断能否覆盖或清除（单独一个键：判断时不必解析整份棋谱）。
-const OWNER = 'frostfall.owner';
-
-export function saveGame(snapshot, owner = '') {
-	try {
-		if (snapshot) {
-			localStorage.setItem(GAME, JSON.stringify(snapshot));
-			localStorage.setItem(OWNER, owner);
-		} else {
-			localStorage.removeItem(GAME);
-			localStorage.removeItem(OWNER);
-		}
-	} catch { /* 同上 */ }
-}
-
-export function saveOwner() {
-	try { return localStorage.getItem(OWNER); } catch { return null; }
-}
-
-export function loadGame() {
-	const g = read(GAME);
-	if (!g || typeof g.fen !== 'string' || !Array.isArray(g.moves)) return null;
-	return g;
-}

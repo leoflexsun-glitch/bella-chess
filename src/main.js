@@ -8,7 +8,8 @@ import { createBoard2d } from './view2d/board.js';
 import { applyBoardTexture } from './view2d/texture.js';
 import { createView3d } from './view3d/view3d.js';
 import { createShell } from './ui/shell.js';
-import { loadSettings, saveSettings, saveGame, loadGame, saveOwner } from './ui/settings.js';
+import { loadSettings, saveSettings } from './ui/settings.js';
+import { createSaveSlot } from './game/saveslot.js';
 import { createAudio } from './core/audio.js';
 import { createHaptics } from './core/haptics.js';
 import { createClock } from './core/clock.js';
@@ -40,7 +41,7 @@ let playing = false;      // 有一局正在进行（或刚结束、可悔棋）
 let selected = -1;
 let legal = [];
 let pendingDeselect = false;
-let promoting = false;
+let promoting = null;      // 等待升变选择时：发起时的局面标记（见 promoKey），局面一变就作废
 let reviewPly = null;      // 正在查看的历史半步；null = 当前局面
 let flipped = false;
 let resignArmed = 0;
@@ -85,14 +86,13 @@ let view = view2d;
 
 const match = createMatch({
 	onReset: reason => {
-		dropPromotion();
 		clearSelection();
 		hintArrow = null;
 		reviewPly = null;
 		// 悔棋时棋子平滑滑回原位；新开局、恢复存档直接摆好。
 		view.setPosition(match.state.pos, { animate: reason === 'undo' });
 		syncClock();               // 终局后悔棋接着下，接着计时
-		persist({ claim: true });  // 恢复存档也认领：此后本页的存档、终局清档才算数
+		if (reason !== 'restore') persist({ claim: true });   // 恢复存档不是新操作，不抢存档位
 		refresh();
 	},
 	onMove: (move, { mover, captured }) => {
@@ -108,7 +108,7 @@ const match = createMatch({
 		const check = !s.over && inCheck(s.pos);
 		if (check) {
 			audio.check();
-			if (live) view.pulse?.(s.pos.kings[s.pos.turn >> 3], 'check');
+			if (live) view.pulse?.(kingSq(s.pos, s.pos.turn), 'check');
 		}
 		// 每步只震一种：新的震动会打断还没震完的上一个。终局由 onEnd 震。
 		if (!s.over) {
@@ -122,7 +122,6 @@ const match = createMatch({
 	},
 	onThink: () => refresh(),
 	onEnd: over => {
-		dropPromotion();           // 如升变待选时认输
 		clearSelection();
 		syncClock();
 		persist();
@@ -130,7 +129,7 @@ const match = createMatch({
 		audio.end(result);
 		haptics.end(result);
 		// 胜方王格金光呼吸（在棋子下面，不挡棋子）。
-		if (over.winner && reviewPly === null) view.pulse?.(match.state.pos.kings[over.winner >> 3], 'win');
+		if (over.winner && reviewPly === null) view.pulse?.(kingSq(match.state.pos, over.winner), 'win');
 		refresh();
 	},
 	onError: message => shell.toast(message)
@@ -148,12 +147,13 @@ function currentPos() {
 // ── 刷新界面 ──────────────────────────────────────────────────────
 
 function refresh() {
+	if (promoting && promoting !== promoKey()) dropPromotion();
 	const s = match.state;
 	const pos = currentPos();
 
 	// 棋盘标记
 	const lastMove = reviewPly === null ? s.lastMove : (reviewPly >= 0 ? s.history[reviewPly].move : null);
-	const checked = inCheck(pos) ? pos.kings[pos.turn >> 3] : -1;
+	const checked = inCheck(pos) ? kingSq(pos, pos.turn) : -1;
 	view.setMarks({
 		lastMove,
 		selected,
@@ -203,7 +203,7 @@ function refresh() {
 
 // 终局时王格底光：胜方金色、负方灰暗、和棋两王淡光。
 function resultMarks(s) {
-	const king = color => s.pos.kings[color >> 3];
+	const king = color => kingSq(s.pos, color);
 	if (!s.over.winner) return { draw: [king(WHITE), king(BLACK)] };
 	return { win: king(s.over.winner), lose: king(other(s.over.winner)) };
 }
@@ -227,21 +227,19 @@ function outcome(over) {
 	return over.winner === match.state.human ? 'win' : 'lose';
 }
 
-// 存档。几个标签页共用一个存档位，并记着它的主人（最近以真实操作写入的标签页）：
-// claim（人走子、新开局、悔棋、恢复存档）总是写入并成为主人；
-// 其余时机（电脑应着、切后台、关页、终局清档）只在本页仍是主人时才动——
-// 旧标签页不会覆盖、清掉或复活别的页刚下的棋。
-const tabId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+// 存档（多标签页规则见 game/saveslot.js）。claim：人的真实操作；终局时只清掉存着本局的存档位。
+const saveSlot = createSaveSlot();
+let gameId = '';
+const newGameId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 function persist({ claim = false } = {}) {
 	if (!playing) return;
 	const s = match.state;
-	const mine = saveOwner() === tabId;
-	if (s.over) { if (mine) saveGame(null); return; }
-	if (claim || mine) {
-		saveGame({ fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() }, tabId);
-	}
+	if (s.over) { saveSlot.end(gameId); return; }
+	saveSlot.save({ id: gameId, fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() }, { claim });
 }
+
+const kingSq = (pos, color) => pos.kings[color >> 3];
 
 const inProgress = () => playing && !match.state.over;
 
@@ -305,13 +303,13 @@ function attempt(from, to) {
 	const color = match.state.human;
 	clearSelection();
 	if (options.length > 1 && options[0].promotion) {
-		promoting = true;
+		const key = promoting = promoKey();
 		refresh();
 		view.askPromotion(to, color).then(type => {
-			if (!promoting) return;   // 已被悔棋或新对局收走，棋盘由它们同步
-			promoting = false;
+			if (promoting !== key) return;   // 已作废：局面变了，棋盘已由别处同步
+			promoting = null;
 			if (type) match.play(from, to, type);
-			else { view.setPosition(match.state.pos); refresh(); }
+			else { view.setPosition(currentPos()); refresh(); }
 		});
 		return true;
 	}
@@ -325,6 +323,7 @@ function attempt(from, to) {
 // 先收掉上一局遗留的升变选择、复盘位置，再交给 match 清空棋谱。
 function startGame({ human, level = settings.level, fen = START_FEN }) {
 	reviewPly = null;
+	gameId = newGameId();
 	playing = true;
 	flipped = human === BLACK;
 	view.setFlipped(flipped);
@@ -339,14 +338,15 @@ function resolveSide(side) {
 	return side === 'b' ? BLACK : WHITE;
 }
 
-// 收掉等待中的升变选择，并把拖到底线的兵画回原格。
-// 局面或对局状态一变（重开、悔棋、终局、复盘）就调用。
+// 升变选择只对发起时的局面有效：重开、悔棋、终局（含认输）、复盘、翻转都会让它作废（refresh 里检查）。
+const promoKey = () => `${gameId}|${match.state.history.length}|${reviewPly}|${flipped}|${Boolean(match.state.over)}`;
+
+// 收掉等待中的升变选择（棋盘会把拖到底线的兵放回原格）。
 function dropPromotion() {
 	if (!promoting) return;
-	promoting = false;
+	promoting = null;
 	board2d.cancelPromotion();
 	shell.close('dlg-promo');
-	view.setPosition(currentPos());
 }
 
 function takeBack() {
@@ -365,9 +365,10 @@ function reviewTo(ply) {
 	const s = match.state;
 	if (!s.history.length) return;
 	const next = Math.max(-1, Math.min(s.history.length - 1, ply));
-	dropPromotion();
+	const target = next === s.history.length - 1 ? null : next;
+	if (target === reviewPly) return;   // 没变（如已在最新一步再按"下一步"）：什么都不做，也不打断升变选择
 	clearSelection();
-	reviewPly = next === s.history.length - 1 ? null : next;
+	reviewPly = target;
 	view.setPosition(currentPos(), { animate: true });
 	refresh();
 }
@@ -385,7 +386,6 @@ function askHint() {
 }
 
 function flip() {
-	dropPromotion();           // 升变选择框按翻转前的格子排布，翻转后会错位
 	flipped = !flipped;
 	view.setFlipped(flipped);
 	refresh();
@@ -517,13 +517,15 @@ window.addEventListener('pagehide', () => { if (inProgress()) persist(); });
 applyBoardTexture(settings.board);
 shell.paintSettings(settings);
 
-const saved = loadGame();
+const saved = saveSlot.load();
 if (saved) {
 	playing = true;
+	gameId = saved.id || newGameId();
 	flipped = Boolean(saved.flipped);
 	clock.start(saved.elapsed);             // restore 之后的 onReset 会按可见性决定是否计时
 	view.setFlipped(flipped);
 	match.restore(saved);
+	if (!saved.id) persist({ claim: true }); // 旧版存档：补上对局 id，终局时才认得出、清得掉
 	if (match.state.history.length) shell.toast('已恢复上一局', 1800);
 } else {
 	view.setPosition(match.state.pos);

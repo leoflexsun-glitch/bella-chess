@@ -61,8 +61,8 @@ async function point(page, square, selector = '#board2d .b2d') {
 const click = async (page, sq, sel) => page.mouse.click(...await point(page, sq, sel));
 const moves = page => page.$$eval('.moves [data-ply]', els => els.map(e => e.textContent));
 const waitMoves = (page, n) => page.waitForFunction(k => document.querySelectorAll('.moves [data-ply]').length >= k, n, { timeout: 20000 });
-// 改存档后刷新。应用在切后台/关页时（pagehide，随后 visibilitychange）会把进行中的本局写回空的或属于本局的存档位，
-// 所以在这两个事件里排在应用之后再写一次，否则刷新时旧对局会覆盖刚写入的存档。game 为 null 表示清空全部存储。
+// 改存档后刷新。测试直接改了存储，应用并不知道：它在切后台/关页时（pagehide，随后 visibilitychange）
+// 会把进行中的本局写回存档位，所以在这两个事件里排在应用之后再写一次。game 为 null 表示清空全部存储。
 async function reloadWith(page, game) {
 	await page.evaluate(g => {
 		const write = () => g ? localStorage.setItem('frostfall.game', JSON.stringify(g)) : localStorage.clear();
@@ -451,7 +451,9 @@ await scenario('升变待选时复盘、认输：选择框收起、棋盘不失�
 	};
 	const pawnAt = () => page.$eval('#board2d .pc[data-p=wP]', el => [el.style.getPropertyValue('--x'), el.style.getPropertyValue('--y')]);
 	await promote();
-	await page.click('.moves [data-ply="0"]');           // 点棋谱进入复盘
+	await page.click('.moves [data-ply="1"]');           // 点的就是当前这一步：什么都不变，选择框应留着
+	assert.ok(await page.locator('#board2d .b2d-promo').isVisible(), '没进入复盘时不应打断升变选择');
+	await page.click('.moves [data-ply="0"]');           // 点更早的一步进入复盘
 	assert.ok(await page.locator('#board2d .b2d-promo').isHidden(), '去复盘时升变选择应收起');
 	await page.click('[data-act="review-exit"]');
 	await page.waitForTimeout(350);
@@ -506,6 +508,25 @@ await scenario('复盘到起始局面：棋谱列表回到顶部', { width: 1280
 	assert.equal(await page.evaluate(() => document.querySelector('.moves').scrollTop), 0, '看起始局面时棋谱应在顶部');
 });
 
+// 音频上下文建好了，但发声时出错（个别内核）：照常下棋。
+await scenario('没有声音也能下：发声时出错不影响走子', { width: 1280, height: 800 }, async page => {
+	await page.addInitScript(() => {
+		const boom = () => { throw new Error('Web Audio broken'); };
+		window.AudioContext = class {
+			state = 'running'; currentTime = 0; sampleRate = 44100; destination = {};
+			createWaveShaper() { return { connect: x => x }; }
+			createGain() { return { gain: { value: 1 }, connect: x => x }; }
+			createOscillator = boom; createBuffer = boom; createBufferSource = boom; createBiquadFilter = boom;
+		};
+	});
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	assert.equal((await moves(page))[0], 'e4');
+});
+
 // 两个标签页：一个停在开局对话框，另一个在下棋。空闲的那个刷新界面时不能清掉别人的存档。
 await scenario('多标签页：空闲页面不清掉另一页的对局存档', { width: 1280, height: 800 }, async (page, ctx) => {
 	await fresh(page);                                   // 空闲页：停在新对局对话框
@@ -519,6 +540,41 @@ await scenario('多标签页：空闲页面不清掉另一页的对局存档', {
 	await page.keyboard.press('Escape');
 	await page.keyboard.press('f');                      // 空闲页刷新界面
 	assert.ok(await page.evaluate(() => localStorage.getItem('frostfall.game')), '空闲页不应清掉另一页的存档');
+});
+
+// 空出的存档位由仍在进行的对局接上；在没"占着"存档位的标签页里认输，也要清掉这局的存档。
+await scenario('多标签页：空位由进行中的局接上，认输清掉本局存档', { width: 1280, height: 800 }, async (page, ctx) => {
+	const hide = p => p.evaluate(() => {
+		Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+		document.dispatchEvent(new Event('visibilitychange'));
+	});
+	const show = p => p.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); });
+	const slot = () => page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game') || 'null'));
+	// A 在下 e4；C 随后开一盘一步杀并下完 → 存档位空出
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	const c = await ctx.newPage();
+	await c.goto(URL);
+	await reloadWith(c, { fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice' });
+	await click(c, 'h1');
+	await click(c, 'h8');
+	await c.waitForSelector('[data-slot=result]:not([hidden])');
+	assert.equal(await slot(), null, 'C 那局结束，存档位空出');
+	await hide(page);                                    // A 切后台：把仍在进行的这局存进空位
+	assert.equal((await slot())?.moves[0], 'e2e4', '空出的存档位应由 A 的对局接上');
+	await show(page);
+	// B 打开时恢复的是 A 这局，B 切后台（存一下）；回到 A 认输：这局的存档要清掉
+	const b = await ctx.newPage();
+	await b.goto(URL);
+	await b.waitForTimeout(200);
+	await hide(b);
+	await page.click('[data-act="resign"]');
+	await page.click('[data-act="resign"]');
+	await page.waitForSelector('[data-slot=result]:not([hidden])');
+	assert.equal(await slot(), null, '认输后这局的存档应清掉，不会再被恢复');
 });
 
 // 存档位只有一个：留给最近在下的那盘。旧标签页切后台/关页、或停在已结束的对局上，都不能覆盖或清掉它。
