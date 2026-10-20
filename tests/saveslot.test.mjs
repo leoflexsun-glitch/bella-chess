@@ -148,13 +148,22 @@ test('还开着的旧版页面又写了一局：再次并入列表时不覆盖�
 	assert.deepEqual(list.map(e => e.game.moves.length).sort(), [2, 5]);
 });
 
-test('还开着的旧版页面接着下同一局：再次并入时并到上次那条，不重复列出', () => {
+test('还开着的旧版页面又存了一次：着法没变就更新那条，不重复列出', () => {
 	const local = memory();
-	local.setItem('frostfall.game', JSON.stringify({ ...game(2), human: 8 }));
+	local.setItem('frostfall.game', JSON.stringify({ ...game(2), human: 8, elapsed: 1000 }));
 	createSaveSlots({ storage: local, session: memory(), now: tick });
-	local.setItem('frostfall.game', JSON.stringify({ ...game(4), human: 8 }));   // 旧版页面又走了两步
+	local.setItem('frostfall.game', JSON.stringify({ ...game(2), human: 8, elapsed: 5000 }));   // 只是用时变了
 	const list = createSaveSlots({ storage: local, session: memory(), now: tick }).list();
-	assert.deepEqual(list.map(e => e.game.moves.length), [4]);
+	assert.deepEqual(list.map(e => e.game.elapsed), [5000]);
+});
+
+test('旧版页面开了开局相同的另一盘：另起一条，不覆盖上一盘', () => {
+	const local = memory();
+	local.setItem('frostfall.game', JSON.stringify({ fen: START_FEN, moves: ['e2e4', 'e7e5'], human: 8 }));
+	createSaveSlots({ storage: local, session: memory(), now: tick });
+	local.setItem('frostfall.game', JSON.stringify({ fen: START_FEN, moves: ['e2e4', 'e7e5', 'g1f3'], human: 8 }));
+	const list = createSaveSlots({ storage: local, session: memory(), now: tick }).list();
+	assert.deepEqual(list.map(e => e.game.moves.length).sort(), [2, 3]);
 });
 
 test('旧版存档并入时写不进去：旧位不删；旧版的"已下完"标记不动', () => {

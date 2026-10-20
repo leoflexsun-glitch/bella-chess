@@ -31,12 +31,13 @@ export function createSaveSlots({ storage, session, now = Date.now } = {}) {
 		.sort((a, b) => (b.game.savedAt ?? 0) - (a.game.savedAt ?? 0));
 
 	// 旧版本只有一个存档位：挪成列表里的一条。还开着的旧版页面会接着写它（旧版的"谁在下"标记不碰，免得那页以为被接手而停下）：
-	// 同一局（起始局面、执子相同，着法接着上次挪来的往下走）并到上次那条，别的局另起一条，谁也不覆盖谁。
+	// 和上次挪来的某条一模一样（起始局面、执子、着法都相同，只是用时变了）就更新那条，否则另起一条——
+	// 旧存档没有对局编号，开局相同的两盘棋分不清，宁可多列一条也不能覆盖。
 	// 写进去了才删旧位；旧版的"已下完"标记（不是对局）留着，还开着的旧版页面靠它知道这局已结束。
 	const legacy = valid(store.get('frostfall.game'));
 	if (legacy) {
 		const same = all().find(({ key: k, game: g }) => k.startsWith(KEY_PREFIX + 'legacy') && g.fen === legacy.fen && g.human === legacy.human
-			&& legacy.moves.join().startsWith(g.moves.join()));
+			&& g.moves.join() === legacy.moves.join());
 		const moved = store.set(same?.key ?? KEY_PREFIX + 'legacy' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), { ...legacy, savedAt: legacy.savedAt ?? now() });
 		if (moved) store.set('frostfall.game', null);
 	}
