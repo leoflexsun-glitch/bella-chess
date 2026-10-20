@@ -139,6 +139,15 @@ test('旧版存档并入列表时记上时间', () => {
 	assert.equal(e.game.savedAt, 12345);
 });
 
+test('还开着的旧版页面又写了一局：再次并入列表时不覆盖上次并入的', () => {
+	const local = memory();
+	local.setItem('frostfall.game', JSON.stringify(game(2)));
+	createSaveSlots({ storage: local, session: memory(), now: tick });
+	local.setItem('frostfall.game', JSON.stringify(game(5)));      // 旧版页面开了新局
+	const list = createSaveSlots({ storage: local, session: memory(), now: tick }).list();
+	assert.deepEqual(list.map(e => e.game.moves.length).sort(), [2, 5]);
+});
+
 test('存储不可用：不报错，按没有存档处理', () => {
 	const broken = { get length() { throw new Error('denied'); }, key() { throw new Error('denied'); }, getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
 	const a = createSaveSlots({ storage: broken, session: broken });

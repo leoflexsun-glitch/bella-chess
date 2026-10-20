@@ -33,7 +33,8 @@ export function createSaveSlots({ storage, session, now = Date.now } = {}) {
 	// 旧版本只有一个存档位：挪成列表里的一条，删掉旧版的"谁在下"标记。
 	const legacy = store.get('frostfall.game');
 	if (legacy !== null) {
-		if (valid(legacy)) store.set(KEY_PREFIX + 'legacy', { ...legacy, savedAt: legacy.savedAt ?? now() });
+		// 每次挪成新的一条：还开着的旧版页面可能又写了一局，不能覆盖上次挪过来的。
+		if (valid(legacy)) store.set(KEY_PREFIX + 'legacy' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), { ...legacy, savedAt: legacy.savedAt ?? now() });
 		store.set('frostfall.game', null);
 	}
 	store.set('frostfall.active', null);
