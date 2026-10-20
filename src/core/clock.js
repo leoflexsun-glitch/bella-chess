@@ -10,7 +10,6 @@ export function createClock(now = () => performance.now()) {
 		start(already = 0) { spent = Math.max(0, Number(already) || 0); since = now(); },
 		resume() { since ??= now(); },
 		stop() { spent = read(); since = null; },
-		read,
-		get running() { return since !== null; }
+		read
 	};
 }

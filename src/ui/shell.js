@@ -85,7 +85,7 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 			if (cur) {
 				const box = movesList.getBoundingClientRect(), r = cur.getBoundingClientRect();
 				movesList.scrollTop += Math.min(0, r.top - box.top) + Math.max(0, r.bottom - box.bottom);
-			} else movesList.scrollTop = movesList.scrollHeight;
+			} else movesList.scrollTop = 0;   // 没有高亮项只可能是看起始局面（或还没走棋）：回到顶部
 		},
 
 		setReview(text) {

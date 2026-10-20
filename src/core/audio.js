@@ -44,7 +44,8 @@ export function createAudio() {
 				return null;
 			}
 		}
-		if (ctx.state === 'suspended') ctx.resume();
+		// 'suspended'（未经用户手势）或 iOS 来电等打断后的 'interrupted'：都要重新拉起。
+		if (ctx.state !== 'running') ctx.resume().catch(() => {});
 		return ctx;
 	};
 

@@ -47,7 +47,6 @@ export function createBoard2d(host, intents = {}) {
 	let drag = null;
 	let hoverSq = -1;
 	let promoFinish = null;
-	let stale = false;           // 动画落定时玩家正拖着子：对账推迟到放手后
 
 	const xy = sq => {
 		const f = sq & 15, r = sq >> 4;
@@ -60,17 +59,21 @@ export function createBoard2d(host, intents = {}) {
 		el.style.setProperty('--y', y);
 	}
 
+	// 棋子代码同时写进 class（决定外观）和 data-p（过渡配对时识别），只在这里改。
+	function setCode(el, code, extra = '') {
+		el.className = `pc ${code}${extra}`;
+		el.dataset.p = code;
+	}
+
 	function makePiece(piece, sq) {
 		const el = document.createElement('i');
-		el.className = `pc ${pieceCode(piece)}`;
-		el.dataset.p = pieceCode(piece);
+		setCode(el, pieceCode(piece));
 		place(el, sq);
 		return el;
 	}
 
-	// 整盘重建（无动画）。悔棋、换局、切视图、动画结束对账都走这里，结果只取决于 board。
+	// 整盘重建（无动画）。换局、翻转、切视图走这里，结果只取决于 board。
 	function render() {
-		stale = false;
 		cancelDrag();
 		const next = new Map();
 		const frag = document.createDocumentFragment();
@@ -81,6 +84,28 @@ export function createBoard2d(host, intents = {}) {
 			frag.append(el);
 		}
 		piecesLayer.replaceChildren(frag);
+		pieces = next;
+	}
+
+	// 动画落定后的对账：原位同子的元素原样保留（包括正被拖着的那颗，拖拽不受打断），
+	// 淡出的、对不上的删掉，缺的补上。结果同样只取决于 board。
+	function reconcile() {
+		const next = new Map();
+		for (let sq = 0; sq < 128; sq++) {
+			if (sq & 0x88 || !board[sq]) continue;
+			const code = pieceCode(board[sq]);
+			let el = pieces.get(sq);
+			if (el?.isConnected && el.dataset.p === code && !el.classList.contains('gone')) {
+				el.classList.remove('moving', 'appear');
+				place(el, sq);
+			} else {
+				el = makePiece(board[sq], sq);
+				piecesLayer.append(el);
+			}
+			next.set(sq, el);
+		}
+		const keep = new Set(next.values());
+		for (const el of [...piecesLayer.children]) if (!keep.has(el)) el.remove();
 		pieces = next;
 	}
 
@@ -186,9 +211,8 @@ export function createBoard2d(host, intents = {}) {
 		animating++;
 		settleTimer = setTimeout(() => {
 			animating = 0;
-			// 动画只是视觉；落定后无条件按真实局面重建一次，任何竞态都留不下残子。
-			// 玩家正拖着子就先不重建（重建会打断拖拽），放手后补上。
-			if (drag) stale = true; else render();
+			// 动画只是视觉；落定后按真实局面对账一次，任何竞态都留不下残子。
+			reconcile();
 			after?.();
 		}, ANIM_MS + 40);
 	}
@@ -264,8 +288,6 @@ export function createBoard2d(host, intents = {}) {
 			el.style.transform = '';
 		}
 		renderMarks();
-		// 补上拖动期间推迟的对账：等弹回动画走完再重建；若已开始新动画或在等升变选择，由它们收尾。
-		if (stale && animating === 0 && promoLayer.hidden) settle();
 	}
 
 	root.addEventListener('pointerup', event => endDrag(event, false));
@@ -354,11 +376,7 @@ export function createBoard2d(host, intents = {}) {
 				const rook = pieces.get(rf);
 				if (rook) { pieces.delete(rf); pieces.set(rt, rook); place(rook, rt); rook.classList.add('moving'); }
 			}
-			if (move.promotion) {
-				const code = pieceCode(move.promotion | colorOf(move.piece));
-				el.className = `pc moving ${code}`;
-				el.dataset.p = code;
-			}
+			if (move.promotion) setCode(el, pieceCode(move.promotion | colorOf(move.piece)), ' moving');
 			settle();
 		},
 

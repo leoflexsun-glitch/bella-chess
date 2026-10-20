@@ -58,7 +58,7 @@ async function point(page, square, selector = '#board2d .b2d') {
 const click = async (page, sq, sel) => page.mouse.click(...await point(page, sq, sel));
 const moves = page => page.$$eval('.moves [data-ply]', els => els.map(e => e.textContent));
 const waitMoves = (page, n) => page.waitForFunction(k => document.querySelectorAll('.moves [data-ply]').length >= k, n, { timeout: 20000 });
-// 改存档后刷新。应用在切后台/关页时（pagehide，随后 visibilitychange）会存下进行中的对局，
+// 改存档后刷新。应用在切后台/关页时（pagehide，随后 visibilitychange）会把进行中的本局写回空的或属于本局的存档位，
 // 所以在这两个事件里排在应用之后再写一次，否则刷新时旧对局会覆盖刚写入的存档。game 为 null 表示清空全部存储。
 async function reloadWith(page, game) {
 	await page.evaluate(g => {
@@ -150,7 +150,8 @@ await scenario('对局进行中从摆棋/识别结果开局：一定是全新一
 
 await scenario('拍照复刻：截图导入 → 自动定位 → 识别 → 核对 → 开全新一局', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
-	const fen = 'r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP3PPP/R2QKB1R w KQ - 0 8';
+	// 轮到黑方（人）走：截图前电脑不会动棋
+	const fen = 'r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP3PPP/R2QKB1R b KQ - 0 8';
 	await page.evaluate(() => localStorage.setItem('frostfall.v2', JSON.stringify({ board: 'pale', pieces: 'celtic' })));
 	await reloadWith(page, { fen, moves: [], human: 16, level: 'novice', flipped: true });
 	await page.waitForTimeout(300);
@@ -416,6 +417,49 @@ await scenario('没有声音也能下：音频不可用时不影响走子', { wi
 	assert.equal((await moves(page))[0], 'e4');
 });
 
+// 升变选择打开时去复盘或认输：选择框要收起，兵回到原格，不能留下"走了一半"的棋。
+await scenario('升变待选时复盘、认输：选择框收起、棋盘不失步', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await reloadWith(page, { fen: 'k7/4P3/8/8/8/8/8/K7 w - - 0 1', moves: ['a1b1', 'a8b7'], human: 8, level: 'novice' });
+	const promote = async () => {
+		const [x1, y1] = await point(page, 'e7'), [x2, y2] = await point(page, 'e8');
+		await page.mouse.move(x1, y1);
+		await page.mouse.down();
+		await page.mouse.move(x2, y2, { steps: 6 });
+		await page.mouse.up();
+		await page.waitForSelector('#board2d .b2d-promo:not([hidden])');
+	};
+	const pawnAt = () => page.$eval('#board2d .pc[data-p=wP]', el => [el.style.getPropertyValue('--x'), el.style.getPropertyValue('--y')]);
+	await promote();
+	await page.click('.moves [data-ply="0"]');           // 点棋谱进入复盘
+	assert.ok(await page.locator('#board2d .b2d-promo').isHidden(), '去复盘时升变选择应收起');
+	await page.click('[data-act="review-exit"]');
+	await page.waitForTimeout(350);
+	assert.deepEqual(await pawnAt(), ['4', '1'], '回到当前局面，兵仍在 e7');
+	await promote();
+	await page.click('[data-act="resign"]');
+	await page.click('[data-act="resign"]');
+	await page.waitForSelector('[data-slot=result]:not([hidden])');
+	await page.waitForTimeout(350);
+	assert.ok(await page.locator('#board2d .b2d-promo').isHidden(), '认输后升变选择应收起');
+	assert.deepEqual(await pawnAt(), ['4', '1'], '认输后兵画在 e7（那步升变没走成）');
+});
+
+// 复盘到起始局面：棋谱列表回到顶部，而不是跳到最新几步。
+await scenario('复盘到起始局面：棋谱列表回到顶部', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await reloadWith(page, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', human: 8, level: 'novice', moves: [
+		'b2b4', 'd7d6', 'c1b2', 'h7h6', 'b2c3', 'a7a6', 'c3d4', 'b8c6', 'd4a7', 'h8h7', 'g1f3', 'c6b4', 'f3g1', 'd8d7', 'a2a3', 'd7h3',
+		'a7b8', 'h3e3', 'a3b4', 'e8d8', 'a1a5', 'e3c5', 'f2f3', 'c8f5', 'd2d4', 'c5c3', 'b1d2', 'c3c4', 'd4d5', 'c4c3', 'h2h3', 'e7e6',
+		'a5a2', 'e6d5', 'b8c7', 'd8c7', 'a2a3', 'd5d4', 'a3a6', 'f8e7'] });
+	const list = await page.evaluate(() => { const m = document.querySelector('.moves'); return [m.scrollHeight, m.clientHeight, m.scrollTop]; });
+	assert.ok(list[0] > list[1] && list[2] > 0, `棋谱应长到需要滚动，且停在最新处：${list}`);
+	await page.click('.moves [data-ply="0"]');           // 点第一步进入复盘，再退到起始局面
+	await page.click('[data-act="review-prev"]');
+	assert.match(await page.textContent('[data-slot=review]'), /起始局面/);
+	assert.equal(await page.evaluate(() => document.querySelector('.moves').scrollTop), 0, '看起始局面时棋谱应在顶部');
+});
+
 // 两个标签页：一个停在开局对话框，另一个在下棋。空闲的那个刷新界面时不能清掉别人的存档。
 await scenario('多标签页：空闲页面不清掉另一页的对局存档', { width: 1280, height: 800 }, async (page, ctx) => {
 	await fresh(page);                                   // 空闲页：停在新对局对话框
@@ -429,6 +473,46 @@ await scenario('多标签页：空闲页面不清掉另一页的对局存档', {
 	await page.keyboard.press('Escape');
 	await page.keyboard.press('f');                      // 空闲页刷新界面
 	assert.ok(await page.evaluate(() => localStorage.getItem('frostfall.game')), '空闲页不应清掉另一页的存档');
+});
+
+// 存档位只有一个：留给最近在下的那盘。旧标签页切后台/关页、或停在已结束的对局上，都不能覆盖或清掉它。
+await scenario('多标签页：旧对局页不覆盖、终局页不清掉新对局的存档', { width: 1280, height: 800 }, async (page, ctx) => {
+	const hide = p => p.evaluate(() => {
+		Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+		document.dispatchEvent(new Event('visibilitychange'));
+	});
+	const slot = () => page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game') || 'null'));
+	// A：一盘没下完的旧棋（白已走 e4）
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	// B：后开的新对局（白走 d4）
+	const b = await ctx.newPage();
+	await b.goto(URL);
+	await b.click('[data-act="new"]');
+	await b.click('#dlg-new [data-act="start"]');
+	await click(b, 'd2');
+	await click(b, 'd4');
+	await waitMoves(b, 2);
+	assert.equal((await slot()).moves[0], 'd2d4', '存档位应是 B 的新对局');
+	await hide(page);                                    // A 切到后台（随后关页同理）
+	assert.equal((await slot()).moves[0], 'd2d4', '旧标签页切后台不应覆盖新对局');
+	// C：在一盘一步杀的对局里将杀结束，然后刷新界面、切后台
+	const c = await ctx.newPage();
+	await c.goto(URL);
+	await reloadWith(c, { fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice' });
+	await click(c, 'h1');
+	await click(c, 'h8');
+	await c.waitForSelector('[data-slot=result]:not([hidden])');
+	assert.equal(await slot(), null, 'C 自己那盘结束后存档清空');
+	await click(b, 'g1');
+	await click(b, 'f3');
+	await waitMoves(b, 4);
+	await c.keyboard.press('f');
+	await hide(c);
+	assert.equal((await slot())?.moves[0], 'd2d4', '已结束的标签页不应清掉 B 的对局');
 });
 
 // 系统开了"减少动态效果"：特效不显示，被吃棋子不淡出，结算卡不浮起。
@@ -464,7 +548,7 @@ await scenario('设置：棋盘主题与棋子套装', { width: 1280, height: 80
 });
 
 await scenario('手机：触屏拖拽走子、震动反馈与开关', { width: 390, height: 844 }, async (page, ctx) => {
-	await page.addInitScript(() => { window.vib = []; navigator.vibrate = p => { window.vib.push(p); return true; }; });
+	await page.addInitScript(fakeVibrator);
 	await fresh(page);
 	await page.click('#dlg-new [data-act="start"]');
 	const cdp = await ctx.newCDPSession(page);
