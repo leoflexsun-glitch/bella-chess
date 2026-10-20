@@ -9,7 +9,7 @@ import { jsonStore } from '../core/store.js';
 
 const KEY = 'frostfall.active';
 
-export function createTabLock({ storage, events = globalThis, onLost } = {}) {
+export function createTabLock({ storage, events = globalThis, onLost, onCleared } = {}) {
 	const store = jsonStore(storage);
 	const tabId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 	let solo = false;
@@ -18,9 +18,17 @@ export function createTabLock({ storage, events = globalThis, onLost } = {}) {
 	const lose = () => { held = false; onLost?.(); };
 
 	events.addEventListener?.('storage', event => {
-		// 只看"谁在下"这个键（key 为 null 表示存储被整个清空）。别的页写进了它，说明别的页接手了：
-		// 本页因写入失败而"独占"也到此为止。别的键的变化与本页在不在下无关。
-		if (event.key !== null && event.key !== KEY) return;
+		// 存储被整个清空（同域的别的页面、清除站点数据）：没有别的页接手，本页在下就接着下——
+		// 重新登记，并让调用方把对局重新存上（onCleared）。
+		if (event.key === null) {
+			if (held && !solo) {
+				store.set(KEY, tabId);
+				onCleared?.();
+			}
+			return;
+		}
+		// 只看"谁在下"这个键。别的页写进了它，说明别的页接手了：本页因写入失败而"独占"也到此为止。
+		if (event.key !== KEY) return;
 		solo = false;
 		if (held && !owned()) lose();
 	});

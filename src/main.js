@@ -86,6 +86,7 @@ let view = view2d;
 // ── 对局 ────────────────────────────────────────────────────────
 
 const match = createMatch({
+	mayThink: () => lock.held,     // 待命的标签页不跑电脑思考
 	onReset: reason => {
 		resignArmed = 0;           // "再按一次认输"只对当前这局有效
 		clearSelection();
@@ -233,7 +234,7 @@ function outcome(over) {
 // 存档：同一时刻只有一个标签页在下这盘棋（tablock.js），只有它写。别的页接手时本页待命（standBy），
 // 用户回到本页时接回，并在需要时重新读出存档（resume）。
 const saveSlot = createSaveSlot();
-const lock = createTabLock({ onLost: standBy });
+const lock = createTabLock({ onLost: standBy, onCleared: () => saveGame() });
 let gameNo = 0;            // 每开一局、每恢复一次存档加一（升变选择据此作废）
 
 // 写存档：只写本页在下、仍在进行的对局。已结束的局由 onEnd 写入终局标记，不能再写回（否则会被当成进行中恢复）。
@@ -290,6 +291,7 @@ function resume() {
 function validSave(saved) {
 	try {
 		return (saved.human === WHITE || saved.human === BLACK)
+			&& Object.hasOwn(LEVEL_TEXT, saved.level)
 			&& saved.moves.every(m => typeof m === 'string')
 			&& prepare(saved.fen).errors.length === 0;
 	} catch {

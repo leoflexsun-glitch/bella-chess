@@ -156,21 +156,28 @@ test('托管环境禁止 worker 时退回主线程计算，电脑照样走棋', 
 	}
 });
 
-test('暂停（标签页待命）后：即使在走子回调里才暂停，电脑也不开始想；resume 后接着想', () => {
-	let m;
-	m = createMatch({ onMove: () => m.pause() });             // 模拟：走子时存档发现别的页已接手 → 转为待命
+test('不允许思考时（标签页待命）：走子、悔棋后都不开始想；允许后 resume 接着想', () => {
+	let allowed = true, m;
+	m = createMatch({ mayThink: () => allowed, onMove: () => { allowed = false; m.pause(); } });   // 走子时发现别的页已接手
 	m.newGame({ human: WHITE, fen: '4k3/8/8/8/8/8/4P3/4K3 w - - 0 1' });
 	assert.ok(m.play(parseSquare('e2'), parseSquare('e4')));
-	assert.equal(posted.length, 0, '暂停后不应发出思考请求');
-	assert.equal(m.state.thinking, false);
+	assert.equal(posted.length, 0, '待命后不应发出思考请求');
+	allowed = true;
 	m.resume();
 	assert.equal(posted.length, 1, '接回后轮到电脑就接着想');
-	assert.equal(m.state.thinking, true);
 });
 
-test('重新开局或恢复会解除暂停', () => {
-	const m = createMatch();
-	m.pause();
-	m.newGame({ human: WHITE, fen: '4k3/8/8/8/8/8/4P3/4K3 b - - 0 40' });
-	assert.equal(posted.length, 1);
+test('待命中下完的局，回来"悔棋接着下"后电脑照常应着', () => {
+	let allowed = true;
+	const m = createMatch({ mayThink: () => allowed });
+	m.newGame({ human: WHITE, fen: '4k3/8/8/8/8/8/4P3/4K3 w - - 0 1' });
+	m.play(parseSquare('e2'), parseSquare('e4'));
+	posted.length = 0;
+	m.resign();
+	allowed = false;
+	m.pause();                                                   // 结束后转为待命……
+	allowed = true;                                              // ……又被接回
+	m.undo(1);
+	m.play(parseSquare('e2'), parseSquare('e4'));
+	assert.equal(posted.length, 1, '电脑应开始思考');
 });

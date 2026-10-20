@@ -76,7 +76,6 @@ export function createMatch(hooks = {}) {
 	let askedAt = 0;
 	let paceTimer = 0;
 	let hint = null;   // { id, fen, done }：进行中的"提示一步"请求
-	let paused = false; // 标签页待命中：不开始思考（重新开局或恢复时解除）
 
 	function onEngine(data) {
 		if (hint && data.id === hint.id) {
@@ -131,7 +130,6 @@ export function createMatch(hooks = {}) {
 	function reset({ human = WHITE, level = 'club', fen = START_FEN } = {}) {
 		cancelThinking();
 		hint = null;
-		paused = false;
 		state.pos = normalize(fromFen(fen));
 		state.startFen = toFen(state.pos);
 		state.history = [];
@@ -182,8 +180,10 @@ export function createMatch(hooks = {}) {
 		if (state.pos.turn !== state.human) think();
 	}
 
+	// hooks.mayThink：调用方此刻是否允许电脑思考（标签页待命时不允许）。每次要想之前现问，
+	// 所以无论从哪条路走到这里（走子、悔棋、开局、恢复），状态都不会过期。
 	function think() {
-		if (state.over || paused) return;
+		if (state.over || hooks.mayThink?.() === false) return;
 		cancelThinking();
 		state.thinking = true;
 		askedAt = performance.now();
@@ -295,14 +295,10 @@ export function createMatch(hooks = {}) {
 				: `[SetUp "1"]\n[FEN "${state.startFen}"]\n\n`;
 			return `${header}${moves ? moves + ' ' : ''}${result()}`;
 		},
-		// 暂停：停下正在进行的思考与提示请求，且在 resume 之前不再开始思考（标签页转为待命时；
-		// 可能就发生在走子回调里，回调返回后 commit 本要接着让电脑思考）。
-		pause() { paused = true; cancelThinking(); hint = null; },
+		// 暂停：停下正在进行的思考与提示请求（标签页转为待命时）。之后是否再想由 hooks.mayThink 决定。
+		pause() { cancelThinking(); hint = null; },
 		// 继续：轮到电脑就接着想。
-		resume() {
-			paused = false;
-			if (!state.over && state.pos.turn !== state.human) think();
-		},
+		resume() { if (!state.over && state.pos.turn !== state.human) think(); },
 		dispose() { cancelThinking(); worker.terminate(); }
 	};
 }

@@ -470,7 +470,8 @@ await scenario('后台标签页打开（无存档）：切过来时看到新对�
 
 // 损坏或来路不明的存档（旧版本、手改、同域的别的应用）：不能卡在启动画面，按没有存档处理。
 await scenario('损坏的存档：照常启动，回到新对局', { width: 1280, height: 800 }, async page => {
-	for (const bad of [{ fen: '', moves: [], human: 8 }, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', moves: [1], human: 8 }, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', moves: [], human: 3 }]) {
+	for (const bad of [{ fen: '', moves: [], human: 8 }, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', moves: [1], human: 8 }, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', moves: [], human: 3 },
+		{ fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', moves: [], human: 16, level: 'toString' }]) {
 		await fresh(page);
 		await reloadWith(page, bad);
 		await page.waitForSelector('#boot', { state: 'detached', timeout: 3000 });
@@ -478,6 +479,23 @@ await scenario('损坏的存档：照常启动，回到新对局', { width: 1280
 	}
 	// 没有 key 的合成键盘事件（自动填充、密码管理器会发）不应报错
 	await page.evaluate(() => { dispatchEvent(new Event('keydown')); document.body.dispatchEvent(new Event('keydown', { bubbles: true })); });
+});
+
+// 本页的局已经结束时被别的页接手（待命），回到本页"悔棋接着下"：电脑要照常应着。
+await scenario('多标签页：结束后待命，回来悔棋接着下', { width: 1280, height: 800 }, async (page, ctx) => {
+	await fresh(page);
+	await reloadWith(page, { fen: 'k7/8/1K6/8/8/8/8/6Q1 w - - 0 1', moves: [], human: 8, level: 'novice' });
+	await click(page, 'g1');
+	await click(page, 'g8');
+	await page.waitForSelector('[data-slot=result]:not([hidden])');
+	const other = await ctx.newPage();
+	await other.goto(URL);                               // 别的页打开：本页转为待命
+	await page.waitForTimeout(200);
+	await page.click('[data-act="takeback"]');           // 回到本页：悔棋接着下
+	await page.waitForTimeout(400);
+	await click(page, 'g1');
+	await click(page, 'g2');                             // 换一步不将杀的
+	await waitMoves(page, 2);                            // 电脑照常应着
 });
 
 // 两边都没有对局时，在不"在下"的那页里点按钮：没有什么可接回的，这一下照常生效。
@@ -681,9 +699,7 @@ await scenario('多标签页：存储被清空时保住进行中的对局', { wi
 	await page.click('#dlg-new [data-act="start"]');
 	await click(page, 'e2');
 	await click(page, 'e4');                             // 电脑开始思考……
-	await other.evaluate(() => localStorage.clear());    // ……这时存储被清空：本页转为待命，思考被停下
-	await page.waitForTimeout(200);
-	await click(page, 'h8');                             // 回到本页点一下：接回
+	await other.evaluate(() => localStorage.clear());    // ……这时存储被清空：没有别的页接手，本页接着下
 	await waitMoves(page, 2);                            // 电脑照常应着，不会卡在它的回合
 	assert.equal((await moves(page))[0], 'e4', '对局还在');
 	assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')))).moves.length, 2, '重新存上');

@@ -83,14 +83,18 @@ test('某次写入临时失败后，一旦收到别的页的通知就不再"独�
 	assert.deepEqual([la.check(), lost], [false, 1]);
 });
 
-test('交接：别的键变化不影响；存储被整个清空时视为失去', () => {
+test('交接：别的键变化不影响；存储被整个清空时本页接着下（重新登记并通知重新存档）', () => {
 	const br = browser(), a = br.open(), b = br.open();
-	let lost = 0;
-	const la = createTabLock({ storage: a.storage, events: a.events, onLost: () => lost++ });
+	let lost = 0, cleared = 0;
+	const la = createTabLock({ storage: a.storage, events: a.events, onLost: () => lost++, onCleared: () => cleared++ });
 	la.claim();
 	b.storage.setItem('frostfall.game', '{}');
 	assert.deepEqual([la.held, lost], [true, 0]);
 	b.storage.clear();
+	assert.deepEqual([la.held, la.check(), lost, cleared], [true, true, 0, 1], '没有别的页接手：不转待命');
+	const lb = createTabLock({ storage: b.storage, events: b.events });
+	assert.equal(lb.held, false);
+	assert.equal(lb.claim(), false, '重新登记后，别的页要接手仍按正常交接');
 	assert.deepEqual([la.held, lost], [false, 1]);
 });
 
