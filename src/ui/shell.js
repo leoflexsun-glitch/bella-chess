@@ -20,6 +20,7 @@ const escapeHtml = text => String(text).replace(/[&<>"]/g, c => ({ '&': '&amp;',
 export function createShell({ onAction, onSetting, onMoveClick }) {
 	const toastBox = $('toast');
 	const movesList = $('moves');
+	let movesKey = null;
 	let toastTimer = 0;
 
 	// 所有 data-act 按钮（顶栏、侧栏、弹窗里）统一派发。
@@ -67,6 +68,12 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 
 		// history：对局记录；current：高亮的半步序号（-1 表示起始局面）。
 		setMoves(history, current) {
+			// refresh 很频繁（每次点选都有）：内容没变就不重建列表、不重算滚动——实测这能省下点选耗时的一半以上。
+			// 列表内容完全由"当前步 + 首步的回合号与执子方 + 各步着法"决定（之后的编号、执子方依次交替）。
+			// 调用方须在复盘条、结算卡更新之后再调用，滚动才按最终布局算。
+			const key = `${current}|${history[0]?.no}|${history[0]?.mover}|${history.map(h => h.san).join(' ')}`;
+			if (key === movesKey) return;
+			movesKey = key;
 			$('moves-empty').hidden = history.length > 0;
 			const rows = [];
 			let row = null;

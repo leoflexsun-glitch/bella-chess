@@ -91,7 +91,7 @@ const match = createMatch({
 		// 悔棋时棋子平滑滑回原位；新开局、恢复存档直接摆好。
 		view.setPosition(match.state.pos, { animate: reason === 'undo' });
 		syncClock();               // 终局后悔棋接着下，接着计时
-		if (reason !== 'restore') persist({ claim: true });   // 恢复存档不是新操作，不抢存档位
+		if (reason !== 'restore') { saveSlot.engage(); persist(); }   // 新开局、悔棋是人的操作；恢复存档不是
 		refresh();
 	},
 	onMove: (move, { mover, captured }) => {
@@ -116,8 +116,9 @@ const match = createMatch({
 			else haptics.move();
 		}
 		if (mover !== match.state.human) clearSelection();
-		// 电脑应着不是人的操作，不抢存档位；终局的存档由 onEnd 处理。
-		if (!s.over) persist({ claim: mover === match.state.human });
+		// 人走子是本页的操作，本页成为存档写入方；电脑应着只在本页仍是写入方时存。终局的存档由 onEnd 处理。
+		if (mover === match.state.human) saveSlot.engage();
+		if (!s.over) persist();
 		refresh();
 	},
 	onThink: () => refresh(),
@@ -228,16 +229,16 @@ function outcome(over) {
 	return over.winner === match.state.human ? 'win' : 'lose';
 }
 
-// 存档（多标签页规则见 game/saveslot.js）。claim：人的真实操作；终局时只清掉存着本局的存档位。
+// 存档（多标签页规则见 game/saveslot.js：只有用户最近操作的那个标签页写）。终局时清掉存着本局的存档位。
 const saveSlot = createSaveSlot();
 let gameId = '';
 const newGameId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-function persist({ claim = false } = {}) {
+function persist() {
 	if (!playing) return;
 	const s = match.state;
 	if (s.over) { saveSlot.end(gameId); return; }
-	saveSlot.save({ id: gameId, fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() }, { claim });
+	saveSlot.save({ id: gameId, fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() });
 }
 
 const kingSq = (pos, color) => pos.kings[color >> 3];
@@ -389,6 +390,7 @@ function askHint() {
 function flip() {
 	flipped = !flipped;
 	view.setFlipped(flipped);
+	persist();                 // 翻转随存档走，立刻存
 	refresh();
 }
 
@@ -409,7 +411,7 @@ function setView(next) {
 	const target = next === '3d' ? view3d : view2d;
 	if (target === view) return;
 	const apply = () => {
-		board2d.cancelPromotion();
+		dropPromotion();
 		view.hide();
 		body.dataset.view = next;
 		view = target;
@@ -509,20 +511,18 @@ for (const key of ['board', 'pieces', 'coords']) body.dataset[key] = settings[ke
 // 不支持震动的设备（iPhone 的 Safari、桌面电脑）不显示震动开关，免得开了没反应。
 if (!haptics.supported) shell.hideSetting('haptics');
 
-// 切到后台或关页：对局进行中就存一次档（含已用时长），再按可见性停表/续表。
-// 关页时 pagehide 与 visibilitychange 都会触发，只存一次。
-let leftSaved = false;
-const saveOnLeave = () => {
-	if (leftSaved) return;
-	leftSaved = true;
-	if (inProgress()) persist();
-};
+// 用户在本页的任何操作（点按、按键、切到前台、在前台打开）都让本页成为存档写入方。
+for (const type of ['pointerdown', 'keydown']) addEventListener(type, () => saveSlot.engage(), { capture: true });
+if (!document.hidden) saveSlot.engage();
+
+// 切到后台或关页：对局进行中就存档（含已用时长），再按可见性停表/续表。
+// 关页时 pagehide 与 visibilitychange 都会触发，重复存一次无妨。
 document.addEventListener('visibilitychange', () => {
-	if (document.hidden) saveOnLeave();
-	else leftSaved = false;
+	if (document.hidden) { if (inProgress()) persist(); }
+	else saveSlot.engage();
 	syncClock();
 });
-window.addEventListener('pagehide', saveOnLeave);
+window.addEventListener('pagehide', () => { if (inProgress()) persist(); });
 applyBoardTexture(settings.board);
 shell.paintSettings(settings);
 
@@ -534,7 +534,7 @@ if (saved) {
 	clock.start(saved.elapsed);             // restore 之后的 onReset 会按可见性决定是否计时
 	view.setFlipped(flipped);
 	match.restore(saved);
-	if (!saved.id) persist({ claim: true }); // 旧版存档：补上对局 id，终局时才认得出、清得掉
+	if (!saved.id) { saveSlot.engage(); persist(); }   // 旧版存档：补上对局 id，终局时才认得出、清得掉
 	if (match.state.history.length) shell.toast('已恢复上一局', 1800);
 } else {
 	view.setPosition(match.state.pos);

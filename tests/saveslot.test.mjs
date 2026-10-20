@@ -1,5 +1,5 @@
-// 存档位的多标签页规则：几个句柄共用一个存储，模拟几个标签页。
-// 每条守卫都至少有一个用例在去掉它时会失败。
+// 存档位的多标签页规则：几个句柄共用一个存储，模拟几个标签页；engage() 表示用户在那一页有了操作。
+// 每条守卫都至少有一个用例在去掉它时会失败（已做变异检查）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSaveSlot } from '../src/game/saveslot.js';
@@ -8,115 +8,124 @@ const memory = () => {
 	const m = new Map();
 	return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) };
 };
-const game = (id, moves = []) => ({ id, fen: 'start', moves });
+const game = (id, moves = [], extra = {}) => ({ id, fen: 'start', moves, ...extra });
+const tab = store => createSaveSlot(store);
 
 test('单个标签页：走子、电脑应着、刷新后切后台都能存；终局清空', () => {
-	const store = memory(), a = createSaveSlot(store);
-	assert.equal(a.load(), null);
-	assert.ok(a.save(game('g1', ['e2e4']), { claim: true }));
+	const store = memory(), a = tab(store);
+	a.engage();
+	assert.ok(a.save(game('g1', ['e2e4'])));
 	assert.ok(a.save(game('g1', ['e2e4', 'e7e5'])), '电脑应着');
-	const reloaded = createSaveSlot(store);                       // 刷新页面
+	const reloaded = tab(store);                                  // 刷新：新页在前台打开
+	reloaded.engage();
 	assert.deepEqual(reloaded.load().moves, ['e2e4', 'e7e5']);
-	assert.ok(reloaded.save(game('g1', ['e2e4', 'e7e5'])), '刷新后没走棋也能存（用时、翻转）');
-	assert.ok(reloaded.save(game('g1', ['e2e4', 'e7e5', 'g1f3'])));
+	assert.ok(reloaded.save(game('g1', ['e2e4', 'e7e5'], { flipped: true })), '没走棋也能存翻转、用时');
 	assert.ok(reloaded.end('g1'));
 	assert.equal(reloaded.load(), null);
 });
 
-test('别的页做过真实操作后，本页不再被动写入（即使着法是延续）', () => {
-	const store = memory(), a = createSaveSlot(store), b = createSaveSlot(store);
-	a.save(game('g1', ['e2e4']), { claim: true });
-	b.load();
-	a.save(game('g1', ['e2e4', 'e7e5']), { claim: true });
-	assert.equal(b.save(game('g1', ['e2e4', 'e7e5', 'g1f3'])), false);
-	assert.equal(b.load().moves.length, 2);
+test('旁观页：用户回到正在下的页后，旁观页不再写入，也写不回自己的用时/翻转/电脑应着', () => {
+	const store = memory(), a = tab(store), b = tab(store);
+	a.engage();
+	a.save(game('g1', ['e2e4']));
+	b.engage();                                                   // 用户打开 B 看了一眼
+	assert.ok(b.save(game('g1', ['e2e4', 'g8f6'])), 'B 当时是写入方（它自己的电脑应着）');
+	a.engage();                                                   // 用户回到 A
+	assert.ok(a.save(game('g1', ['e2e4', 'e7e5'], { elapsed: 600000, flipped: true })), 'A 关页时存下自己的局面');
+	assert.equal(b.save(game('g1', ['e2e4', 'g8f6'], { elapsed: 1000 })), false, 'B 之后切后台不写');
+	assert.deepEqual(b.load().moves, ['e2e4', 'e7e5']);
+	assert.equal(b.load().elapsed, 600000);
 });
 
-test('位里是别的局时，同步的页也不能被动写入', () => {
-	const store = memory(), a = createSaveSlot(store), b = createSaveSlot(store);
-	a.save(game('y'), { claim: true });
-	b.load();                                                     // 同步了，但 B 手里是 x 局
-	assert.equal(b.save(game('x', ['e2e4'])), false);
-	assert.equal(b.load().id, 'y');
+test('旧标签页不覆盖别的页刚开的新局；也清不掉它', () => {
+	const store = memory(), a = tab(store), e = tab(store);
+	a.engage();
+	a.save(game('x', ['e2e4']));
+	e.engage();
+	e.save(game('y'));                                            // E 开新局
+	assert.equal(a.save(game('x', ['e2e4', 'e7e5'])), false, 'A 的电脑应着不抢存档位');
+	assert.equal(a.end('x'), false);
+	assert.equal(a.load().id, 'y');
 });
 
-test('被动写入只能延续位里的着法：分叉或倒退都不写，相同则写（更新用时等）', () => {
-	const store = memory(), a = createSaveSlot(store), b = createSaveSlot(store);
-	a.save(game('g1', ['e2e4']), { claim: true });
-	a.save(game('g1', ['e2e4', 'e7e5']));                         // A 的电脑应着
-	b.load();
-	assert.equal(b.save(game('g1', ['e2e4', 'd7d5'])), false, '分叉的电脑应着');
-	assert.equal(b.save(game('g1', ['e2e4'])), false, '倒退');
-	assert.ok(b.save(game('g1', ['e2e4', 'e7e5'])), '相同');
+test('后台页的电脑把同一局将死：用户正在另一页接着下这局，不清档', () => {
+	const store = memory(), a = tab(store), b = tab(store);
+	a.engage();
+	a.save(game('g1', ['e2e4']));
+	b.engage();                                                   // 用户到 B 接着下同一局
+	b.save(game('g1', ['e2e4', 'e7e5', 'g1f3']));
+	assert.equal(a.end('g1'), false);
+	assert.equal(b.load().moves.length, 3);
 });
 
-test('旁观页的被动写入不会把正在下的页挤出同步', () => {
-	const store = memory(), a = createSaveSlot(store), b = createSaveSlot(store);
-	a.save(game('g1', ['e2e4']), { claim: true });
-	b.load();
-	assert.ok(b.save(game('g1', ['e2e4'])), 'B 切后台');
-	assert.ok(a.save(game('g1', ['e2e4', 'e7e5'])), 'A 的电脑应着照常保存');
-	assert.ok(a.end('g1'), 'A 终局照常清档');
+test('存档位空着时，停在开局对话框的空闲页不妨碍别的页把进行中的局存进去', () => {
+	const store = memory(), a = tab(store), idle = tab(store);
+	a.engage();
+	a.save(game('x'));
+	a.end('x');                                                   // 位空出
+	idle.engage();                                                // 用户打开一个新页（还没开局）
+	const c = tab(store);
+	assert.ok(c.save(game('w', ['d2d4'])), '进行中的 w 接上');
 });
 
-test('存档位空出后：进行中的别的局可以写进去，已结束的局不能写回', () => {
-	const store = memory(), a = createSaveSlot(store), b = createSaveSlot(store);
-	a.save(game('x', ['e2e4']), { claim: true });
-	b.load();
-	a.end('x');
-	assert.equal(b.save(game('x', ['e2e4'])), false, '已结束的局不能复活');
-
-	const c = createSaveSlot(store), d = createSaveSlot(store);
-	c.save(game('y', ['d2d4']), { claim: true });
-	d.save(game('z', ['c2c4']), { claim: true });
-	assert.equal(c.save(game('y', ['d2d4', 'd7d5'])), false, '位被 z 占着');
-	d.end('z');
-	assert.ok(c.save(game('y', ['d2d4', 'd7d5'])), 'z 结束后位空出，y 可以接上');
-	assert.equal(c.load().id, 'y');
-});
-
-test('"已结束"名单记得不止一局', () => {
-	const store = memory(), a = createSaveSlot(store), b = createSaveSlot(store);
-	a.save(game('x', ['e2e4']), { claim: true });
-	b.load();
-	b.save(game('x', ['e2e4', 'e7e5']), { claim: true });
-	b.end('x');
-	b.save(game('y'), { claim: true });
-	b.end('y');
-	assert.equal(a.save(game('x', ['e2e4'])), false, 'x 结束后又有 y 结束，x 仍不能复活');
-});
-
-test('终局只清掉存着本局、且没被别的页接着下过的存档位', () => {
-	const store = memory(), a = createSaveSlot(store), b = createSaveSlot(store);
-	a.save(game('x'), { claim: true });
-	b.save(game('y'), { claim: true });
+test('终局只清掉位里的本局', () => {
+	const store = memory(), a = tab(store);
+	a.engage();
+	a.save(game('y'));
 	assert.equal(a.end('x'), false, '位里是 y');
 	assert.equal(a.load().id, 'y');
-	assert.equal(a.end('x'), false, '即使已与当前版本同步，也只清本局');
-	assert.equal(a.load().id, 'y');
-
-	const c = createSaveSlot(store), d = createSaveSlot(store);
-	c.save(game('g1', ['e2e4']), { claim: true });
-	d.load();
-	d.save(game('g1', ['e2e4', 'e7e5', 'g1f3']), { claim: true });  // D 接着这局下
-	assert.equal(c.end('g1'), false, '旧页 C 认输不清掉 D 的进度');
-	assert.ok(d.save(game('g1', ['e2e4', 'e7e5', 'g1f3', 'b8c6'])), 'D 之后照常保存');
 });
 
-test('旧版存档（没有元数据）可以读出并接着存', () => {
+test('存档位空出后：进行中的别的局可以接上，已结束的局不能写回', () => {
+	const store = memory(), a = tab(store), b = tab(store), c = tab(store);
+	a.engage();
+	a.save(game('x', ['e2e4']));
+	b.engage();                                                   // B 打开同一局
+	b.save(game('x', ['e2e4', 'e7e5']));
+	assert.ok(b.end('x'), 'B 把这局下完');
+	assert.equal(a.save(game('x', ['e2e4'])), false, '已结束的局不能复活');
+
+	c.engage();
+	c.save(game('z', ['c2c4']));
+	assert.equal(a.save(game('w', ['d2d4'])), false, '位被 z 占着（写入方是 C）');
+	assert.ok(c.end('z'));
+	assert.ok(a.save(game('w', ['d2d4'])), 'z 结束后位空出，进行中的 w 可以接上');
+	assert.ok(a.save(game('w', ['d2d4', 'd7d5'])), '接上之后 A 是写入方，继续存');
+	assert.equal(a.load().id, 'w');
+	assert.equal(c.save(game('v')), false, '接上之后 A 是写入方，C 要等用户在它那里有操作');
+});
+
+test('"已结束"名单去重、记得不止一局', () => {
+	const store = memory(), a = tab(store), b = tab(store);
+	a.engage();
+	a.save(game('x'));
+	a.end('x');
+	b.engage();
+	for (let i = 0; i < 25; i++) {                                // 同一局反复"终局—悔棋接着下—终局"
+		b.engage();                                               // 点「悔棋接着下」
+		assert.ok(b.save(game('g')));
+		assert.ok(b.end('g'));
+	}
+	assert.equal(a.save(game('x')), false, 'x 仍在名单里，不能复活');
+});
+
+test('旧版存档（没有元数据）可以读出；用户在本页操作后照常存取', () => {
 	const store = memory();
 	store.setItem('frostfall.game', JSON.stringify({ fen: 'start', moves: ['e2e4'] }));
-	const a = createSaveSlot(store);
+	store.setItem('frostfall.meta', JSON.stringify({ rev: 3, id: 'old', ended: 'z' }));   // 上一版的元数据格式
+	const a = tab(store);
 	assert.deepEqual(a.load().moves, ['e2e4']);
-	assert.ok(a.save(game('g1', ['e2e4']), { claim: true }));
+	assert.equal(a.save(game('g1', ['e2e4'])), false, '还没操作：不写');
+	a.engage();
+	assert.ok(a.save(game('g1', ['e2e4'])));
 	assert.ok(a.end('g1'));
 });
 
 test('存储不可用（沙箱 iframe 等）时不抛错', () => {
 	const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
-	const a = createSaveSlot(broken);
+	const a = tab(broken);
 	assert.equal(a.load(), null);
-	assert.doesNotThrow(() => a.save(game('g1'), { claim: true }));
+	assert.doesNotThrow(() => { a.engage(); a.save(game('g1')); a.end('g1'); });
 	const desc = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 	Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('SecurityError'); } });
 	try {

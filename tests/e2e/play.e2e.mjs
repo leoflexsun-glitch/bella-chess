@@ -171,7 +171,8 @@ await scenario('拍照复刻：截图导入 → 自动定位 → 识别 → 核�
 	const fen = 'r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP3PPP/R2QKB1R b KQ - 0 8';
 	await page.evaluate(() => localStorage.setItem('frostfall.v2', JSON.stringify({ board: 'pale', pieces: 'celtic' })));
 	await reloadWith(page, { fen, moves: [], human: 16, level: 'novice', flipped: true });
-	await page.waitForTimeout(300);
+	// 等启动遮罩淡出并移除：淡出途中截图，整页蒙着一层半透明底色，识别会偶发出错
+	await page.waitForSelector('#boot', { state: 'detached' });
 	const shot = await page.screenshot();      // 黑方视角的整页截图
 	await page.click('.topbar [data-act="photo"]');
 	await page.locator('#photo input[type=file]').nth(1).setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: shot });
@@ -520,6 +521,20 @@ await scenario('动画收尾时升变待选：兵停在底线等选择', { width
 	assert.equal(await page.locator('#board2d .pc[data-p=wQ]').count(), 1, '选后升变为后');
 });
 
+// 按住方向键快速复盘：上一段的淡出还没收尾就开始下一段，看不见的残子不能越积越多。
+await scenario('快速连按复盘：棋子元素不堆积', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await reloadWith(page, { fen: START, human: 8, level: 'novice', moves: LONG_GAME });
+	// 往前走才会经过吃子、留下淡出的棋子：先退到开头，等落定，再快速往前
+	for (let i = 0; i < 40; i++) await page.keyboard.press('ArrowLeft');
+	await page.waitForTimeout(400);
+	for (let i = 0; i < 39; i++) await page.keyboard.press('ArrowRight');
+	const gone = await page.locator('#board2d .pc.gone').count();
+	assert.ok(gone <= 1, `快速复盘时最多只剩最后一步正在淡出的棋子，实际 ${gone} 个`);
+	await page.waitForTimeout(400);
+	assert.equal(await page.locator('#board2d .pc.gone').count(), 0);
+});
+
 // 复盘到起始局面：棋谱列表回到顶部，而不是跳到最新几步。
 await scenario('复盘到起始局面：棋谱列表回到顶部', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
@@ -613,6 +628,38 @@ await scenario('多标签页：空位由进行中的局接上，认输清掉本�
 	await page.click('[data-act="resign"]');
 	await page.waitForSelector('[data-slot=result]:not([hidden])');
 	assert.equal(await slot(), null, '认输后这局的存档应清掉，不会再被恢复');
+});
+
+// 旁观页：用户打开第二个标签页看一眼，又回到原来那页接着下。之后旁观页切后台，不能写回它自己的用时与翻转。
+await scenario('多标签页：旁观页不写回自己的用时与翻转', { width: 1280, height: 800 }, async (page, ctx) => {
+	const slot = () => page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game') || 'null'));
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	const b = await ctx.newPage();
+	await b.goto(URL);                                   // 旁观页：恢复同一局
+	await b.waitForTimeout(200);
+	await hideTab(b);
+	await showTab(page);                                 // 回到 A
+	await page.keyboard.press('f');                      // 翻转：立刻存
+	assert.equal((await slot()).flipped, true, '翻转应立刻存下');
+	await page.waitForTimeout(1200);
+	await hideTab(page);
+	const fromA = await slot();
+	await showTab(b);                                    // 旁观页再被切到前台又切走——这算用户看了它
+	await hideTab(b);
+	const afterB = await slot();
+	assert.equal(afterB.flipped, false, '用户切回 B，B 成为写入方，写入它自己的局面（这是用户最后看的那页）');
+	await showTab(page);
+	await page.click('#board2d');                        // 用户回到 A 并点了一下
+	await hideTab(page);
+	const back = await slot();
+	assert.equal(back.flipped, true, '回到 A 后，A 的翻转重新存下');
+	assert.ok(back.elapsed >= fromA.elapsed, 'A 的用时不倒退');
+	await hideTab(b);                                    // B 没被再看：不写
+	assert.equal((await slot()).flipped, true, '没被再看的旁观页不写');
 });
 
 // 存档位只有一个：留给最近在下的那盘。旧标签页切后台/关页、或停在已结束的对局上，都不能覆盖或清掉它。

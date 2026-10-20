@@ -176,6 +176,8 @@ export function createBoard2d(host, intents = {}) {
 	function animateTo(next) {
 		cancelDrag();
 		clearTimeout(settleTimer);
+		// 连按方向键快速复盘时，上一段的淡出还没收尾：直接清掉，免得看不见的残子越积越多。
+		for (const el of piecesLayer.querySelectorAll('.pc.gone')) el.remove();
 		board = Int8Array.from(next.board ?? next);
 		const left = new Map(pieces);
 		const nextMap = new Map();
@@ -333,6 +335,7 @@ export function createBoard2d(host, intents = {}) {
 		// 摆到某局面（board 为 0x88 数组或带 board 字段的局面）；animate 时棋子平滑滑过去。
 		setPosition(next, { animate = false } = {}) {
 			fxLayer.replaceChildren();   // 一次性特效属于旧局面，换局面就收掉
+			parked = null;               // 停在底线等升变的兵也属于旧局面
 			if (animate && pieces.size) { animateTo(next); return; }
 			board = Int8Array.from(next.board ?? next);
 			clearTimeout(settleTimer);
