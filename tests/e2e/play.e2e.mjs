@@ -881,6 +881,14 @@ await scenario('接着下的局恢复后即终局：本页原来那局不被删'
 	assert.equal(await page.locator('#dlg-new .saved-item').count(), 1, '原来那局还在列表里');
 });
 
+await scenario('存档列表：不是今年的局带上年份', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await page.evaluate(start => localStorage.setItem('frostfall.game.old', JSON.stringify(
+		{ fen: start, moves: ['e2e4'], human: 8, level: 'novice', elapsed: 0, savedAt: new Date(2020, 9, 21, 9, 5).getTime() })), START);
+	await page.reload();
+	assert.match(await page.textContent('#dlg-new .saved-item span'), /2020年10月21日 09:05/);
+});
+
 await browser.close();
 server.close();
 if (errors.length) { console.log('页面错误：\n  ' + errors.join('\n  ')); process.exitCode = 1; }

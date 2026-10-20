@@ -64,7 +64,7 @@ test('超过 8 局时删掉一个月没动过的；坏数据不列出；旧版�
 	const a = createSaveSlots({ storage: local, session: memory(), now: tick });
 	assert.deepEqual(a.list().map(e => e.game.moves.length), [7]);
 	assert.equal(local.getItem('frostfall.game'), null);
-	assert.equal(local.getItem('frostfall.active'), null);
+	assert.equal(local.getItem('frostfall.active'), '"x"', '旧版的"谁在下"标记不碰：还开着的旧版页面不会以为被接手');
 	const b = createSaveSlots({ storage: local, session: memory(), now: days });
 	for (let i = 0; i < 10; i++) { b.begin(); b.save(game(i + 1)); }
 	const left = createSaveSlots({ storage: local, session: memory() }).list().map(e => e.game.moves.length);
@@ -143,9 +143,18 @@ test('还开着的旧版页面又写了一局：再次并入列表时不覆盖�
 	const local = memory();
 	local.setItem('frostfall.game', JSON.stringify(game(2)));
 	createSaveSlots({ storage: local, session: memory(), now: tick });
-	local.setItem('frostfall.game', JSON.stringify(game(5)));      // 旧版页面开了新局
+	local.setItem('frostfall.game', JSON.stringify(game(5, '6k1/8/8/8/8/8/8/R5K1 w - - 0 1')));   // 旧版页面开了新局
 	const list = createSaveSlots({ storage: local, session: memory(), now: tick }).list();
 	assert.deepEqual(list.map(e => e.game.moves.length).sort(), [2, 5]);
+});
+
+test('还开着的旧版页面接着下同一局：再次并入时并到上次那条，不重复列出', () => {
+	const local = memory();
+	local.setItem('frostfall.game', JSON.stringify({ ...game(2), human: 8 }));
+	createSaveSlots({ storage: local, session: memory(), now: tick });
+	local.setItem('frostfall.game', JSON.stringify({ ...game(4), human: 8 }));   // 旧版页面又走了两步
+	const list = createSaveSlots({ storage: local, session: memory(), now: tick }).list();
+	assert.deepEqual(list.map(e => e.game.moves.length), [4]);
 });
 
 test('存储不可用：不报错，按没有存档处理', () => {

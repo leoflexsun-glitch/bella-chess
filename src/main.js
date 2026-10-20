@@ -271,7 +271,8 @@ function openNew() {
 function savedAt(time) {
 	const d = new Date(time ?? 0), now = new Date(), pad = n => String(n).padStart(2, '0');
 	const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-	return d.toDateString() === now.toDateString() ? `今天 ${hm}` : `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
+	if (d.toDateString() === now.toDateString()) return `今天 ${hm}`;
+	return `${d.getFullYear() === now.getFullYear() ? '' : `${d.getFullYear()}年`}${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
 }
 
 // 存档要先校验：损坏或来路不明的存档（旧版本、手改、同域的别的应用）不能让页面卡在启动画面。
