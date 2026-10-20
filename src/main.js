@@ -260,7 +260,7 @@ function continueGame(key) {
 
 // 新对局对话框里列出没下完的各局（不含本页正在下的这局）。
 function openNew() {
-	shell.showSaved(saves.list().filter(e => e.game.moves.length && validSave(e.game)).map(({ key, game }) => ({
+	shell.showSaved(saves.list().filter(e => validSave(e.game)).map(({ key, game }) => ({
 		key,
 		title: `执${game.human === WHITE ? '白' : '黑'} · ${LEVEL_TEXT[game.level]}`,
 		meta: `${game.moves.length} 步 · ${savedAt(game.savedAt)}`

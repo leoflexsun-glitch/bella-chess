@@ -4,6 +4,7 @@
 // 本页正在下哪一局记在 sessionStorage（每个标签页一份、刷新还在）：刷新后接着下本页这局；新开的页从列表里选。
 
 import { jsonStore } from '../core/store.js';
+import { START_FEN } from '../chess/engine.js';
 
 const KEY_PREFIX = 'frostfall.game.';
 const CURRENT = 'frostfall.current';
@@ -11,6 +12,8 @@ const KEEP = 8;            // 没下完的局超过这么多时，删掉更早�
 const STALE = 30 * 86400000;
 
 const valid = g => g && typeof g.fen === 'string' && Array.isArray(g.moves) ? g : null;
+// 标准开局、一步没走：开了就放下的局，不值得留。摆棋、拍照得到的局面即使没走也要留。
+const blank = g => !g.moves.length && g.fen === START_FEN;
 
 export function createSaveSlots({ storage, session, now = Date.now } = {}) {
 	const store = jsonStore(storage), tab = jsonStore(session, 'sessionStorage');
@@ -36,29 +39,29 @@ export function createSaveSlots({ storage, session, now = Date.now } = {}) {
 	store.set('frostfall.active', null);
 
 	return {
-		// 没下完的各局，新的在前；不含本页正在下的这局。
-		list: () => all().filter(e => e.key !== key),
+		// 没下完的各局，新的在前；不含本页正在下的这局和空局。
+		list: () => all().filter(e => e.key !== key && !blank(e.game)),
 		// 本页刷新前在下的那局的键（没有则 null）。
 		get previous() { return tab.get(CURRENT); },
 		get(k) { return valid(store.get(k)); },
 		// 本页开始下一局。from 是接着下的那条存档：挪到本页的新键下（记为刚存的，免得马上被当成最旧的删掉）。
-		// 新键写不进去（存满、被禁用）就沿用原键，不删原条。本页原来那局一步没走的话不留。
+		// 新键写不进去（存满、被禁用）就不删原条——也不改写原条：它可能正在别的页里下。本页原来那局是空局的话不留。
 		begin(from = null) {
-			if (key && !valid(store.get(key))?.moves.length) store.set(key, null);
+			const own = key && valid(store.get(key));
+			if (own && blank(own)) store.set(key, null);
 			key = KEY_PREFIX + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 			if (from) {
 				const game = store.get(from);
-				if (game && !store.set(key, { ...game, savedAt: now() })) key = from;
-				else store.set(from, null);
+				if (!game || store.set(key, { ...game, savedAt: now() })) store.set(from, null);
 				tab.set(CURRENT, key);
 			} else {
 				tab.set(CURRENT, null);
 			}
-			// 有棋步的局与一步没走的局（开了就关掉的页留下的，列表里不显示）分开限量：后者不能挤掉前者。
-			// 有棋步的局只删一个月没动过的：最近的可能正在别的页里下（后台页面随时会被浏览器回收，回来时要靠存档恢复）。
+			// 空局（开了就关掉的页留下的，列表里不显示）与其他局分开限量：前者不能挤掉后者。
+			// 其他局只删一个月没动过的：最近的可能正在别的页里下（后台页面随时会被浏览器回收，回来时要靠存档恢复）。
 			const others = all().filter(e => e.key !== key);
-			const played = others.filter(e => e.game.moves.length).slice(KEEP).filter(e => now() - (e.game.savedAt ?? 0) > STALE);
-			for (const e of [...played, ...others.filter(e => !e.game.moves.length).slice(KEEP)]) store.set(e.key, null);
+			const kept = others.filter(e => !blank(e.game)).slice(KEEP).filter(e => now() - (e.game.savedAt ?? 0) > STALE);
+			for (const e of [...kept, ...others.filter(e => blank(e.game)).slice(KEEP)]) store.set(e.key, null);
 		},
 		save(snapshot) {
 			if (!key) return false;

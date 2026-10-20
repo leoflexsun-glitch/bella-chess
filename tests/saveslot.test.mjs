@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSaveSlots } from '../src/game/saveslot.js';
+import { START_FEN } from '../src/chess/engine.js';
 
 function memory() {
 	const data = new Map();
@@ -13,7 +14,7 @@ function memory() {
 		removeItem: k => data.delete(k)
 	};
 }
-const game = n => ({ fen: 'start', moves: Array(n).fill('e2e4') });
+const game = (n, fen = START_FEN) => ({ fen, moves: Array(n).fill('e2e4') });
 let t = 0;
 const tick = () => ++t;                 // 每次存档时间各不相同
 const DAY = 86400000;
@@ -70,16 +71,15 @@ test('超过 8 局时删掉一个月没动过的；坏数据不列出；旧版�
 	assert.deepEqual(left, [10, 9, 8, 7, 6, 5, 4, 3, 2], '留下最新的：本页这局 + 之前 8 局（旧版那条也已过期删掉）');
 });
 
-test('挪存档时新键写不进去：沿用原条，不删', () => {
+test('挪存档时新键写不进去：原条不删，也不被本页改写（它可能正在别的页里下）', () => {
 	const local = memory();
 	local.setItem('frostfall.game.x', JSON.stringify(game(3)));
 	const full = { ...local, get length() { return local.length; }, key: i => local.key(i), getItem: k => local.getItem(k), removeItem: k => local.removeItem(k),
 		setItem: (k, v) => { if (k !== 'frostfall.game.x') throw new Error('quota'); local.setItem(k, v); } };
 	const session = memory(), a = createSaveSlots({ storage: full, session });
 	a.begin('frostfall.game.x');
-	assert.equal(local.getItem('frostfall.game.x') !== null, true, '原条还在');
-	assert.equal(a.previous, 'frostfall.game.x');
-	assert.equal(a.save(game(4)), true, '接着写原条');
+	assert.equal(a.save(game(4)), false);
+	assert.equal(JSON.parse(local.getItem('frostfall.game.x')).moves.length, 3, '原条还在、没被改写');
 });
 
 test('一步没走的局不留：反复开新局不会挤掉没下完的局', () => {
@@ -100,7 +100,8 @@ test('别的页开了就关、一步没走的空局：不挤掉没下完的局',
 	a.begin();
 	const left = createSaveSlots({ storage: local, session: memory() }).list();
 	assert.deepEqual(left.filter(e => e.game.moves.length).map(e => e.game.moves.length), [8, 7, 6, 5, 4, 3, 2, 1]);
-	assert.ok(left.filter(e => !e.game.moves.length).length <= 8, '空局也限量');
+	const blanks = Array.from({ length: local.length }, (_, i) => JSON.parse(local.getItem(local.key(i)))).filter(g => !g.moves.length);
+	assert.ok(blanks.length <= 8, '空局也限量');
 });
 
 test('超过 8 局但最近动过的不删：可能正在别的页里下（后台页被回收后要靠它恢复）', () => {
@@ -111,6 +112,15 @@ test('超过 8 局但最近动过的不删：可能正在别的页里下（后�
 	for (let i = 0; i < 10; i++) { b.begin(); b.save(game(i + 2)); }
 	const a2 = createSaveSlots({ storage: local, session: sa });   // A 页被回收后重新打开
 	assert.equal(a2.get(a2.previous)?.moves.length, 1);
+});
+
+test('摆棋/拍照得到的局面没走棋就去接别的局：局面留着，列表里能选回来', () => {
+	const local = memory(), b = createSaveSlots({ storage: local, session: memory(), now: tick });
+	b.begin(); b.save(game(3));                          // 列表里的另一局
+	const a = createSaveSlots({ storage: local, session: memory(), now: tick });
+	a.begin(); a.save(game(0, '6k1/8/8/8/8/8/8/R5K1 w - - 0 1'));
+	a.begin(a.list()[0].key);
+	assert.deepEqual(a.list().map(e => e.game.fen), ['6k1/8/8/8/8/8/8/R5K1 w - - 0 1']);
 });
 
 test('选中最旧的那局接着下：不会马上被当成最旧的删掉', () => {

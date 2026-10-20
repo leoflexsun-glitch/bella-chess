@@ -120,7 +120,6 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 }
 .board-col { width: var(--board); flex: none; display: flex; flex-direction: column; gap: 8px; }
 .board-wrap { position: relative; width: 100%; aspect-ratio: 1; border-radius: 8px; box-shadow: var(--shadow); }
-/* 待命提示：这盘棋在另一个窗口里下。 */
 .saved-list { display: grid; gap: 6px; max-height: 184px; overflow-y: auto; }
 .saved-item {
 	display: flex; align-items: center; justify-content: space-between; gap: 12px;
