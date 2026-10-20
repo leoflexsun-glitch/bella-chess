@@ -598,7 +598,9 @@ document.addEventListener('visibilitychange', () => {
 	else if (document.hasFocus()) resume();
 	syncClock();
 });
-window.addEventListener('focus', () => { if (!document.hidden) resume(); });
+// 点进没有焦点的窗口时，focus 先于这一下的 pointerdown：若因此接回、画面变了，紧随的那一下也只用来接回（见下）。
+let focusTookOver = -Infinity;
+window.addEventListener('focus', () => { if (!document.hidden && resume()) focusTookOver = performance.now(); });
 window.addEventListener('pagehide', saveGame);
 // 待命提示被返回手势、Esc 等关掉：说明用户要用这一页，接回（否则看着正常，电脑却不走）。
 document.getElementById('dlg-standby').addEventListener('close', () => { if (!lock.held) resume(); });
@@ -627,7 +629,13 @@ addEventListener('pointerdown', event => {
 	}
 	swallowClick = false;
 	swallowPointer = null;
-	if (!lock.check() && takeOver(event)) swallowPointer = event.pointerId;
+	const justFocused = performance.now() - focusTookOver < 300;
+	focusTookOver = -Infinity;
+	if (justFocused) {
+		event.preventDefault();
+		event.stopPropagation();
+		swallowPointer = event.pointerId;
+	} else if (!lock.check() && takeOver(event)) swallowPointer = event.pointerId;
 }, { capture: true });
 addEventListener('pointerup', event => {
 	if (event.pointerId !== swallowPointer) return;
@@ -648,9 +656,9 @@ addEventListener('keydown', event => { if (!event.repeat && appKey(event) && !lo
 applyBoardTexture(settings.board);
 shell.paintSettings(settings);
 
-// 在后台打开的标签页（按住 Ctrl 点开、浏览器恢复会话），或可见但没有焦点的窗口，先不接手；
-// 用户切过来、点进来时再接（见 resume），免得打断正在下的那页。
-const background = document.hidden || !document.hasFocus();
+// 在后台打开的标签页（按住 Ctrl 点开、浏览器恢复会话）先不接手，切过来时再接（见 resume），免得打断正在下的那页。
+// 只看 hidden、不看焦点：嵌在 iframe 里、焦点在开发者工具时 hasFocus() 也是 false，照常打开的页面不能因此不恢复存档。
+const background = document.hidden;
 if (!background) lock.claim();
 const saved = background ? null : saveSlot.load();
 if (saved && restoreGame(saved)) {

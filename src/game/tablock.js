@@ -16,15 +16,15 @@ export function createTabLock({ storage, events = globalThis, onLost, onCleared 
 	let held = false;
 	const owned = () => solo || store.get(KEY) === tabId;
 	const lose = () => { held = false; onLost?.(); };
+	// 重新登记后让调用方重新存档。先定好 solo 再回调：存储读不出也写不进时，回调里的 check() 走 solo，
+	// 不会再次判定"被清空"而无限递归。
+	const reclaim = () => { solo = !store.set(KEY, tabId); onCleared?.(); };
 
 	events.addEventListener?.('storage', event => {
 		// 存储被整个清空（同域的别的页面、清除站点数据）：没有别的页接手，本页在下就接着下——
 		// 重新登记，并让调用方把对局重新存上（onCleared）。
 		if (event.key === null) {
-			if (held && !solo) {
-				store.set(KEY, tabId);
-				onCleared?.();
-			}
+			if (held && !solo) reclaim();
 			return;
 		}
 		// 只看"谁在下"这个键。别的页写进了它，说明别的页接手了：本页因写入失败而"独占"也到此为止。
@@ -38,8 +38,7 @@ export function createTabLock({ storage, events = globalThis, onLost, onCleared 
 		check() {
 			if (held && !solo && store.get(KEY) === null) {
 				// "谁在下"被清掉了（本页里清空了存储，收不到通知）：没有别的页接手，重新登记、接着下。
-				store.set(KEY, tabId);
-				onCleared?.();
+				reclaim();
 				return true;
 			}
 			const now = owned();

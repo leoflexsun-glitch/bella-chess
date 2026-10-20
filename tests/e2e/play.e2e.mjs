@@ -962,6 +962,35 @@ await scenario('音效：不削波、第一声不偏小', { width: 800, height: 
 	assert.ok(spread < 3, `连续落子音量差 ${spread.toFixed(1)} dB（${r.seq.map(v => v.toFixed(1))}）`);
 });
 
+// 点进没有焦点的待命窗口：focus 先到、已接回并换了画面，紧随的这一下不能作用到用户还没看到的局面上。
+await scenario('多标签页：点进待命窗口时先到的 focus 接回，这一下不落子', { width: 1280, height: 800 }, async (page, ctx) => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	const b = await ctx.newPage();
+	await b.goto(URL);                                   // B 接手；A 待命
+	await b.waitForTimeout(200);
+	await page.evaluate(() => dispatchEvent(new Event('focus')));   // 点进 A：focus 先于 pointerdown
+	await click(page, 'g1');
+	await page.waitForTimeout(100);
+	assert.equal(await page.locator('.mk.sel').count(), 0, '接回那一下不应选中棋子');
+	await click(page, 'g1');                             // 之后的点按照常生效
+	await page.waitForSelector('.mk.sel', { timeout: 1000 });
+});
+
+// 嵌在 iframe 里、焦点在开发者工具等：页面可见但 hasFocus() 为 false，照常打开时仍要恢复存档。
+await scenario('可见但没有焦点时打开：照常恢复存档', { width: 1280, height: 800 }, async page => {
+	await page.addInitScript(() => { if (localStorage.getItem('test.nofocus')) document.hasFocus = () => false; });
+	await fresh(page);
+	await page.evaluate(() => localStorage.setItem('test.nofocus', '1'));
+	await reloadWith(page, { fen: START, moves: ['e2e4', 'e7e5'], human: 8, level: 'novice', elapsed: 0 });
+	await page.waitForSelector('#boot', { state: 'detached', timeout: 3000 });
+	assert.deepEqual(await moves(page), ['e4', 'e5']);
+	assert.ok(await page.isHidden('#dlg-new[open]'), '不应弹出新对局对话框');
+});
+
 await browser.close();
 server.close();
 if (errors.length) { console.log('页面错误：\n  ' + errors.join('\n  ')); process.exitCode = 1; }

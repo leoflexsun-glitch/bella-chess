@@ -98,6 +98,21 @@ test('交接：别的键变化不影响；存储被整个清空时本页接着�
 	assert.deepEqual([la.held, lost], [false, 1]);
 });
 
+test('存储中途变得读不出也写不进：重新登记不会无限递归', () => {
+	const tab = browser().open();
+	let broken = false;
+	const storage = {
+		getItem: k => broken ? null : tab.storage.getItem(k),
+		setItem: (k, v) => { if (broken) throw new Error('denied'); tab.storage.setItem(k, v); },
+		removeItem: k => { if (broken) throw new Error('denied'); tab.storage.removeItem(k); }
+	};
+	let cleared = 0;
+	const lock = createTabLock({ storage, events: tab.events, onCleared: () => { cleared++; lock.check(); } });
+	lock.claim();
+	broken = true;
+	assert.deepEqual([lock.check(), lock.held, cleared], [true, true, 1]);
+});
+
 test('存储不可用时只有本页，接手照样成功', () => {
 	const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
 	const lock = createTabLock({ storage: broken, events: {} });
