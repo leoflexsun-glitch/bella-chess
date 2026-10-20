@@ -425,6 +425,9 @@ await scenario('刷新后切后台：用时与翻转照常存下', { width: 1280
 	const before = await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')));
 	await page.keyboard.press('f');
 	await page.waitForTimeout(1200);
+	await page.evaluate(() => dispatchEvent(new Event('blur')));   // 两个窗口并排时切走：只有失焦
+	const blurred = await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')));
+	assert.ok(blurred.elapsed >= before.elapsed + 1000, `窗口失焦时也应存下用时：${before.elapsed} → ${blurred.elapsed}`);
 	await hideTab(page);
 	const after = await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')));
 	assert.equal(after.flipped, true, '翻转应存下');
@@ -625,9 +628,32 @@ await scenario('多标签页：空闲页面不清掉另一页的对局存档', {
 	await click(other, 'e4');
 	await waitMoves(other, 2);
 	assert.ok(await page.evaluate(() => localStorage.getItem('frostfall.game')), '下棋页应已存档');
-	await page.keyboard.press('Escape');
-	await page.keyboard.press('f');                      // 空闲页刷新界面
+	await page.keyboard.press('Escape');                 // 回到空闲页按了个键：接手，读出那盘
 	assert.ok(await page.evaluate(() => localStorage.getItem('frostfall.game')), '空闲页不应清掉另一页的存档');
+	assert.ok(await page.isHidden('#dlg-new[open]'), '接回对局时关掉新对局对话框，别在它后面悄悄换局面');
+	assert.equal((await moves(page)).length, 2, '空闲页接着那盘');
+});
+
+// 标签页被冻结、从往返缓存恢复等：错过了"别的页接手"的通知。它不能以为自己还在下而写回旧局面，
+// 用户回到它时要重新读出最新局面。
+await scenario('多标签页：错过接手通知的旧页不写存档，回来时重读', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	// 模拟别的页悄悄接手并接着下了两步（本页自己的写入不触发 storage 事件，正好等于"错过通知"）
+	await page.evaluate(() => {
+		const g = JSON.parse(localStorage.getItem('frostfall.game'));
+		g.moves.push('g1f3', 'b8c6');
+		localStorage.setItem('frostfall.game', JSON.stringify(g));
+		localStorage.setItem('frostfall.active', JSON.stringify('another-tab'));
+	});
+	await page.evaluate(() => dispatchEvent(new Event('blur')));   // 旧页的写入时机：应被拒绝
+	assert.equal((await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')))).moves.length, 4, '旧页不能写回旧局面');
+	await hideTab(page);
+	await showTab(page);                                 // 用户回到这页
+	assert.equal((await moves(page)).length, 4, '回来时读出最新局面');
 });
 
 // 同一时刻只有一个标签页在下：用户看着（打开、切到前台、点按）的那页接手，并从存档读出最新局面；
@@ -666,6 +692,13 @@ await scenario('多标签页：同一时刻只有一页在下，切换时接着�
 	assert.ok(await b.isVisible('#dlg-new[open]'), 'B 看到可开新局');
 	await hideTab(b);
 	assert.equal(await slot(), null, '已结束的局不会被写回');
+	// 回到 A：存档已空，A 这局本来就结束了——留着结算与棋谱，不被清掉
+	await hideTab(page);
+	await showTab(page);
+	assert.ok(await page.isVisible('[data-slot=result]:not([hidden])'), 'A 的结算还在');
+	assert.equal((await moves(page)).length, 4, 'A 的棋谱还在');
+	await page.keyboard.press('f');                      // 终局后翻转：不能把已结束的局写回存档
+	assert.equal(await slot(), null, '终局后翻转不写回');
 });
 
 // 系统开了"减少动态效果"：特效不显示，被吃棋子不淡出，结算卡不浮起。

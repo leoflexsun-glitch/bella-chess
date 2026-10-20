@@ -45,14 +45,24 @@ test('交接：后接手的页拿到"在下"，先前那页收到通知转为待
 	const lost = [];
 	const la = createTabLock({ storage: a.storage, events: a.events, onLost: () => lost.push('a') });
 	const lb = createTabLock({ storage: b.storage, events: b.events, onLost: () => lost.push('b') });
-	la.claim();
+	assert.equal(la.claim(), false, '第一次接手：之前不是本页');
 	assert.deepEqual([la.held, lb.held], [true, false]);
-	lb.claim();
+	assert.equal(lb.claim(), false);
 	assert.deepEqual([la.held, lb.held, lost], [false, true, ['a']]);
-	la.claim();
+	assert.equal(la.claim(), false, '回来接手：之前是 B 在下，要重新读存档');
 	assert.deepEqual([la.held, lb.held, lost], [true, false, ['a', 'b']]);
-	la.claim();                                                   // 重复接手不打扰别人
-	assert.deepEqual(lost, ['a', 'b']);
+	assert.equal(la.claim(), true, '本来就是本页在下：不必重读');
+	assert.deepEqual(lost, ['a', 'b'], '重复接手不打扰别人');
+});
+
+test('错过了通知（标签页被冻结等）：held 现读存储，不会误以为自己还在下', () => {
+	const br = browser(), a = br.open(), b = br.open();
+	const la = createTabLock({ storage: a.storage, events: {} });   // A 收不到 storage 事件
+	const lb = createTabLock({ storage: b.storage, events: b.events });
+	la.claim();
+	lb.claim();
+	assert.equal(la.held, false);
+	assert.equal(la.claim(), false, 'A 回来接手时知道要重读存档');
 });
 
 test('交接：别的键变化不影响；存储被整个清空时视为失去', () => {
@@ -69,6 +79,7 @@ test('交接：别的键变化不影响；存储被整个清空时视为失去',
 test('存储不可用时只有本页，接手照样成功', () => {
 	const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
 	const lock = createTabLock({ storage: broken, events: {} });
-	lock.claim();
+	assert.equal(lock.claim(), false);
 	assert.equal(lock.held, true);
+	assert.equal(lock.claim(), true);
 });

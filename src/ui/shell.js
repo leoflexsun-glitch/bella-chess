@@ -42,7 +42,16 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 		movesList.scrollLeft += d.x;
 		pinned = true;
 	}
-	movesList.addEventListener('scroll', () => { const d = overflow(); pinned = Math.abs(d.x) < 2 && Math.abs(d.y) < 2; }, { passive: true });
+	// 用户滚动时记下当前步还在不在可见区。滑动时 scroll 事件很密，每帧最多算一次（此时布局已算好，不额外强制布局）。
+	let pinCheck = 0;
+	movesList.addEventListener('scroll', () => {
+		if (pinCheck) return;
+		pinCheck = requestAnimationFrame(() => {
+			pinCheck = 0;
+			const d = overflow();
+			pinned = Math.abs(d.x) < 2 && Math.abs(d.y) < 2;
+		});
+	}, { passive: true });
 	// 棋谱区大小变了（复盘条、结算卡出现，窗口缩放、横竖屏切换）：当前步原本可见就让它继续可见。
 	if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (pinned) scrollToCurrent(); }).observe(movesList);
 	let toastTimer = 0;

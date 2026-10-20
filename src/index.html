@@ -59,10 +59,6 @@
 			</div>
 			<div class="board-wrap">
 				<div id="board2d"></div>
-				<div class="standby" data-slot="standby" hidden>
-					<p>这盘棋正在另一个窗口里下</p>
-					<button class="btn primary" type="button" data-act="resume">在此继续</button>
-				</div>
 			</div>
 			<div class="player" data-slot="player-bottom">
 				<span class="avatar pc"></span>
@@ -303,6 +299,11 @@
 
 <div class="toast" data-slot="toast" role="status" aria-live="polite"></div>
 
+<!-- 待命：这盘棋正在另一个窗口里下。全屏盖住（2D、3D 都看得到）；点哪里都会接回。 -->
+<div class="standby" data-slot="standby" hidden>
+	<p>这盘棋正在另一个窗口里下</p>
+	<button class="btn primary" type="button" data-act="resume">在此继续</button>
+</div>
 <div id="boot"><span class="boot-mark pc wN"></span></div>
 
 <!-- build:script（构建时替换为内联打包脚本） -->
