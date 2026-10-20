@@ -180,10 +180,8 @@ export function createMatch(hooks = {}) {
 		if (state.pos.turn !== state.human) think();
 	}
 
-	// hooks.mayThink：调用方此刻是否允许电脑思考（标签页待命时不允许）。每次要想之前现问，
-	// 所以无论从哪条路走到这里（走子、悔棋、开局、恢复），状态都不会过期。
 	function think() {
-		if (state.over || hooks.mayThink?.() === false) return;
+		if (state.over) return;
 		cancelThinking();
 		state.thinking = true;
 		askedAt = performance.now();
@@ -297,10 +295,6 @@ export function createMatch(hooks = {}) {
 				: `[SetUp "1"]\n[FEN "${state.startFen}"]\n\n`;
 			return `${header}${moves ? moves + ' ' : ''}${result()}`;
 		},
-		// 暂停：停下正在进行的思考与提示请求（标签页转为待命时）。之后是否再想由 hooks.mayThink 决定。
-		pause() { cancelThinking(); hint = null; },
-		// 继续：轮到电脑就接着想。
-		resume() { if (!state.over && state.pos.turn !== state.human) think(); },
 		dispose() { cancelThinking(); worker.terminate(); }
 	};
 }

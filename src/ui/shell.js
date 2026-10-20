@@ -157,13 +157,11 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 			}
 		},
 
-		// 待命提示：这盘棋正在另一个窗口里下，提供"在此继续"。
-		// 返回之前是否正显示着。
-		setStandby(on) {
-			const dialog = document.getElementById('dlg-standby'), was = dialog.open;
-			if (on && !was) dialog.showModal();
-			else if (!on && was) dialog.close();
-			return was;
+		// 新对局对话框里"接着下"的列表：items 为 { key, title, meta }，没有就整块隐藏。
+		showSaved(items) {
+			$('saved').hidden = !items.length;
+			$('saved-list').innerHTML = items.map(({ key, title, meta }) =>
+				`<button type="button" class="saved-item" data-act="continue" data-key="${escapeHtml(key)}"><b>${escapeHtml(title)}</b><span>${escapeHtml(meta)}</span></button>`).join('');
 		},
 
 		// 设备不支持的设置项整行隐藏（如没有震动马达）。

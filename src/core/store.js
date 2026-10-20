@@ -1,8 +1,8 @@
 // 本机存储（JSON）：读写失败一律静默降级。
 // 隐私模式、禁用站点数据、沙箱 iframe 等环境里，连访问 localStorage 这个属性都会抛错，所以惰性取、只在 try 里碰。
 
-export function jsonStore(storage) {
-	const target = () => storage ?? globalThis.localStorage;
+export function jsonStore(storage, area = 'localStorage') {
+	const target = () => storage ?? globalThis[area];
 	return {
 		get(key) {
 			try { return JSON.parse(target().getItem(key) || 'null'); } catch { return null; }

@@ -115,6 +115,10 @@
 <dialog class="sheet" id="dlg-new" aria-labelledby="dlg-new-title">
 	<form method="dialog">
 		<header class="sheet-head"><h2 id="dlg-new-title">新对局</h2><button class="ibtn" value="cancel" aria-label="关闭"><svg><use href="#i-x"/></svg></button></header>
+		<div class="field" data-slot="saved" hidden>
+			<label>接着下没下完的</label>
+			<div class="saved-list" data-slot="saved-list"></div>
+		</div>
 		<div class="field">
 			<label>我执</label>
 			<div class="seg" data-setting="side">
@@ -188,11 +192,6 @@
 	</form>
 </dialog>
 
-<!-- 待命：这盘棋正在另一个窗口里下。模态对话框，叠在其他对话框之上；在窗口里点哪里都会接回。 -->
-<dialog class="sheet small standby" id="dlg-standby" aria-label="待命">
-	<p>这盘棋正在另一个窗口里下</p>
-	<button class="btn primary" type="button" data-act="resume">在此继续</button>
-</dialog>
 <!-- ── 3D 视图的升变选择（2D 视图在棋盘上直接选） ─────────────── -->
 <dialog class="sheet small" id="dlg-promo" aria-label="兵升变">
 	<form method="dialog">

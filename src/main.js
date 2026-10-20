@@ -10,8 +10,7 @@ import { applyBoardTexture } from './view2d/texture.js';
 import { createView3d } from './view3d/view3d.js';
 import { createShell } from './ui/shell.js';
 import { loadSettings, saveSettings } from './ui/settings.js';
-import { createSaveSlot } from './game/saveslot.js';
-import { createTabLock } from './game/tablock.js';
+import { createSaveSlots } from './game/saveslot.js';
 import { createAudio } from './core/audio.js';
 import { createHaptics } from './core/haptics.js';
 import { createClock } from './core/clock.js';
@@ -86,7 +85,6 @@ let view = view2d;
 // ── 对局 ────────────────────────────────────────────────────────
 
 const match = createMatch({
-	mayThink: () => lock.held,     // 待命的标签页不跑电脑思考
 	onReset: reason => {
 		resignArmed = 0;           // "再按一次认输"只对当前这局有效
 		clearSelection();
@@ -128,7 +126,7 @@ const match = createMatch({
 		clearSelection();
 		hintArrow = null;          // 终局后不再留着提示箭头
 		syncClock();
-		if (playing && lock.check()) saveSlot.finish();
+		if (playing) saves.finish();
 		const result = outcome(over);
 		audio.end(result);
 		haptics.end(result);
@@ -141,7 +139,7 @@ const match = createMatch({
 
 function canMove() {
 	const s = match.state;
-	return playing && !s.over && !s.thinking && s.pos.turn === s.human && reviewPly === null && !promoting && lock.held;
+	return playing && !s.over && !s.thinking && s.pos.turn === s.human && reviewPly === null && !promoting;
 }
 
 function currentPos() {
@@ -232,64 +230,44 @@ function outcome(over) {
 	return over.winner === match.state.human ? 'win' : 'lose';
 }
 
-// 存档：同一时刻只有一个标签页在下这盘棋（tablock.js），只有它写。别的页接手时本页待命（standBy），
-// 用户回到本页时接回，并在需要时重新读出存档（resume）。
-const saveSlot = createSaveSlot();
-// 存储被清空后重新存上：进行中的局重新存档；已结束的局重新写上"已结束"，免得待命页把旧副本当成进行中的局写回。
-const lock = createTabLock({
-	onLost: standBy,
-	onCleared: () => { if (playing && match.state.over) saveSlot.finish(); else saveGame(); }
-});
+// 存档：每局一条，各标签页只写自己的那条（saveslot.js），互不覆盖。
+const saves = createSaveSlots();
 let gameNo = 0;            // 每开一局、每恢复一次存档加一（升变选择据此作废）
 
-// 写存档：只写本页在下、仍在进行的对局。已结束的局由 onEnd 写入终局标记，不能再写回（否则会被当成进行中恢复）。
+// 写存档：只写仍在进行的对局。已结束的局由 onEnd 从列表里删掉，不能再写回（否则会被当成没下完）。
 function currentSnapshot() {
 	const s = match.state;
 	return { fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() };
 }
 
 function saveGame() {
-	if (inProgress() && lock.check()) saveSlot.save(currentSnapshot());
+	if (inProgress()) saves.save(currentSnapshot());
 }
 
-// 别的标签页接手了这盘棋：本页停下电脑思考与计时，不再写存档。
-// 确实有一盘正在别处下时，显示待命提示（两个窗口并排时看得到；它是模态对话框，叠在其他对话框之上）。
-function standBy() {
-	match.pause();
-	clearSelection();
-	syncClock();
-	if (saveSlot.load()) shell.setStandby(true);
-	refresh();
+// 接着下列表里的某一局：先存好本页这局（它留在列表里），再把选中的那局挪到本页名下。
+function continueGame(key) {
+	const saved = saves.get(key);
+	if (!saved || !validSave(saved)) return;
+	saveGame();
+	restoreGame(saved);
+	saves.begin(key);
+	shell.close('dlg-new');
 }
 
-// 用户回到本页（切到前台、点按、按键）：接手这盘棋。之前若是别的页在下，就从存档读出最新局面——
-// 别的页可能已经接着下了。存档标着"已下完"：本页这局还在进行就说明它已在别处结束，作废并回到新对局
-// （本页这局本来就结束了则留着结算）。存档为空（比如存储被清空）：以本页为准，接着下、接着存。
-// 返回画面是否因此变了（读出了别处的对局、回到新对局、或收起了待命提示）——变了的话，
-// 触发接手的那次点按/按键就不再往下传，免得作用到用户还没看见的局面上。
-function resume() {
-	if (lock.claim()) return false;
-	const hadNotice = shell.setStandby(false);
-	const saved = saveSlot.load();
-	if (saved && restoreGame(saved)) {
-		shell.close('dlg-new');            // 别在对话框后面悄悄换了局面：让用户看到接回的这盘
-		return true;
-	}
-	if (saveSlot.finished && inProgress()) {
-		playing = false;
-		flipped = false;
-		view.setFlipped(false);
-		match.newGame();
-		if (!editor.isOpen && !photo.isOpen) shell.open('dlg-new');   // 正在摆棋、拍照时不打扰
-		return true;
-	}
-	if (inProgress()) {
-		match.resume();                    // 待命时停下的电脑思考接着来
-		syncClock();
-		saveGame();
-	}
-	refresh();
-	return hadNotice;
+// 新对局对话框里列出没下完的各局（不含本页正在下的这局）。
+function openNew() {
+	shell.showSaved(saves.list().filter(e => e.game.moves.length && validSave(e.game)).map(({ key, game }) => ({
+		key,
+		title: `执${game.human === WHITE ? '白' : '黑'} · ${LEVEL_TEXT[game.level]}`,
+		meta: `${game.moves.length} 步 · ${savedAt(game.savedAt)}`
+	})));
+	shell.open('dlg-new');
+}
+
+function savedAt(time) {
+	const d = new Date(time ?? 0), now = new Date(), pad = n => String(n).padStart(2, '0');
+	const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+	return d.toDateString() === now.toDateString() ? `今天 ${hm}` : `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
 }
 
 // 存档要先校验：损坏或来路不明的存档（旧版本、手改、同域的别的应用）不能让页面卡在启动画面。
@@ -320,9 +298,9 @@ const kingSq = (pos, color) => pos.kings[color >> 3];
 
 const inProgress = () => playing && !match.state.over;
 
-// 计时与否只由一个条件决定：本页在下、对局进行中且页面可见。
+// 计时与否只由一个条件决定：对局进行中且页面可见。
 function syncClock() {
-	if (inProgress() && !document.hidden && lock.held) clock.resume();
+	if (inProgress() && !document.hidden) clock.resume();
 	else clock.stop();
 }
 
@@ -399,8 +377,8 @@ function attempt(from, to) {
 // 任何入口（新对局、再来一局、摆棋、拍照复刻）都是一盘全新的对局：
 // 先收掉上一局遗留的升变选择、复盘位置，再交给 match 清空棋谱。
 function startGame({ human, level = settings.level, fen = START_FEN }) {
-	lock.claim();              // 开新局是明确的操作：本页接手（别的页转为待命）
-	shell.setStandby(false);
+	saveGame();                // 本页原来那局存好、留在列表里
+	saves.begin();
 	reviewPly = null;
 	gameNo++;
 	playing = true;
@@ -418,7 +396,7 @@ function resolveSide(side) {
 }
 
 // 升变选择只对发起时的局面有效：重开、悔棋、终局（含认输）、复盘、翻转都会让它作废（refresh 里检查）。
-const promoKey = () => `${gameNo}|${match.state.history.length}|${reviewPly}|${flipped}|${Boolean(match.state.over)}|${lock.held}`;
+const promoKey = () => `${gameNo}|${match.state.history.length}|${reviewPly}|${flipped}|${Boolean(match.state.over)}`;
 
 // 收掉等待中的升变选择（棋盘会把拖到底线的兵放回原格）。
 function dropPromotion() {
@@ -503,9 +481,10 @@ function setView(next) {
 
 // ── 动作与设置 ───────────────────────────────────────────────────
 
-function handleAction(act) {
+function handleAction(act, button) {
 	switch (act) {
-		case 'new': shell.open('dlg-new'); break;
+		case 'new': openNew(); break;
+		case 'continue': continueGame(button.dataset.key); break;
 		case 'start': startGame({ human: resolveSide(settings.side) }); break;
 		case 'settings': shell.open('dlg-settings'); break;
 		case 'setup': shell.close('dlg-new'); editor.open(playing ? match.state.pos : null); break;
@@ -516,7 +495,6 @@ function handleAction(act) {
 		case 'flip': flip(); break;
 		case 'hint': askHint(); break;
 		case 'copy': copyText(match.pgn(), '棋谱已复制（PGN）'); break;
-		case 'resume': resume(); break;
 		case 'resign':
 			if (!inProgress()) break;
 			if (Date.now() - resignArmed < 3000) { resignArmed = 0; match.resign(); }
@@ -589,85 +567,25 @@ for (const key of ['board', 'pieces', 'coords']) body.dataset[key] = settings[ke
 // 不支持震动的设备（iPhone 的 Safari、桌面电脑）不显示震动开关，免得开了没反应。
 if (!haptics.supported) shell.hideSetting('haptics');
 
-// 切到后台或关页：存下已用时长，再按可见性停表/续表；切回来时接回这盘棋。
-// 关页时两个事件都会触发，重复存一次无妨。
-// 切到前台且窗口有焦点（真在用这一页）才接手：两个窗口叠着时，后面那个只是露出来，不该把棋接走。
-// 没有焦点时，等它获得焦点、或用户在里面点按/按键再接。
+// 切到后台或关页：存下已用时长，再按可见性停表/续表。关页时两个事件都会触发，重复存一次无妨。
 document.addEventListener('visibilitychange', () => {
 	if (document.hidden) saveGame();
-	else if (document.hasFocus()) resume();
 	syncClock();
 });
-// 点进没有焦点的窗口时，focus 先于这一下的 pointerdown：若因此接回、画面变了，紧随的那一下也只用来接回（见下）。
-let focusTookOver = -Infinity;
-window.addEventListener('focus', () => { if (!document.hidden && resume()) focusTookOver = performance.now(); });
 window.addEventListener('pagehide', saveGame);
-// 待命提示被返回手势、Esc 等关掉：说明用户要用这一页，接回（否则看着正常，电脑却不走）。
-document.getElementById('dlg-standby').addEventListener('close', () => { if (!lock.held) resume(); });
-// 两个窗口并排时，切到另一个窗口不会触发 visibilitychange：失焦时也存一次用时，免得被接手时丢掉。
-window.addEventListener('blur', saveGame);
-// 对局进行中、窗口有焦点时每 15 秒存一次用时：别的窗口抢先接手时（失焦存档与对方接手跨进程、先后不定）最多丢 15 秒。
-// 没有焦点时失焦那一刻已经存过。
-setInterval(() => { if (!document.hidden && document.hasFocus()) saveGame(); }, 15000);
-
-// 在待命的窗口里点按或按本应用的快捷键，就接回这盘棋。这一下只用来接回，不作用到刚读出的局面上：
-// 按下被拦住，同一次的抬起与随后的 click 也吞掉。组合键、功能键（切窗口、刷新、查找等）不拦。
-let swallowPointer = null, swallowClick = false;
-const appKey = event => !event.ctrlKey && !event.metaKey && !event.altKey
-	&& (event.key?.length === 1 || ['Enter', 'Escape', 'ArrowLeft', 'ArrowRight'].includes(event.key));
-const takeOver = event => {
-	if (!resume()) return false;       // 画面没变（比如两边都没有对局）：这一下照常生效
-	event.preventDefault();
-	event.stopPropagation();
-	return true;
-};
-addEventListener('pointerdown', event => {
-	if (!event.isPrimary && swallowPointer !== null) {   // 接手那一下按着时落下的其他手指，一并吞掉
-		event.preventDefault();
-		event.stopPropagation();
-		return;
-	}
-	swallowClick = false;
-	swallowPointer = null;
-	const justFocused = performance.now() - focusTookOver < 300;
-	focusTookOver = -Infinity;
-	if (justFocused) {
-		event.preventDefault();
-		event.stopPropagation();
-		swallowPointer = event.pointerId;
-	} else if (!lock.check() && takeOver(event)) swallowPointer = event.pointerId;
-}, { capture: true });
-addEventListener('pointerup', event => {
-	if (event.pointerId !== swallowPointer) return;
-	swallowPointer = null;
-	swallowClick = true;                 // click 紧随抬起；若没有 click（比如拖走了），过一会儿自动失效
-	setTimeout(() => { swallowClick = false; }, 400);
-	event.stopPropagation();
-}, { capture: true });
-addEventListener('pointercancel', event => { if (event.pointerId === swallowPointer) swallowPointer = null; }, { capture: true });
-addEventListener('click', event => {
-	if (!swallowClick) return;
-	swallowClick = false;
-	event.preventDefault();
-	event.stopPropagation();
-}, { capture: true });
-// 按住键自动连发时不必每次现读存储
-addEventListener('keydown', event => { if (!event.repeat && appKey(event) && !lock.check()) takeOver(event); }, { capture: true });
 applyBoardTexture(settings.board);
 shell.paintSettings(settings);
 
-// 在后台打开的标签页（按住 Ctrl 点开、浏览器恢复会话）先不接手，切过来时再接（见 resume），免得打断正在下的那页。
-// 只看 hidden、不看焦点：嵌在 iframe 里、焦点在开发者工具时 hasFocus() 也是 false，照常打开的页面不能因此不恢复存档。
-const background = document.hidden;
-if (!background) lock.claim();
-const saved = background ? null : saveSlot.load();
+// 刷新：接着下本页刷新前那局。新开的页：在新对局对话框里选接着下哪一局，或开新局。
+const previous = saves.previous;
+const saved = previous && saves.get(previous);
 if (saved && restoreGame(saved)) {
+	saves.begin(previous);
 	if (match.state.history.length) shell.toast('已恢复上一局', 1800);
 } else {
 	view.setPosition(match.state.pos);
 	refresh();
-	// 后台打开的页也先打开新对局对话框：用户切过来时，若接回了一盘对局，resume 会关掉它
-	shell.open('dlg-new');
+	openNew();
 }
 if (settings.view === '3d') setView('3d');
 

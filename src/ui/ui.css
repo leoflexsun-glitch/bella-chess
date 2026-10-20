@@ -121,8 +121,15 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .board-col { width: var(--board); flex: none; display: flex; flex-direction: column; gap: 8px; }
 .board-wrap { position: relative; width: 100%; aspect-ratio: 1; border-radius: 8px; box-shadow: var(--shadow); }
 /* 待命提示：这盘棋在另一个窗口里下。 */
-dialog.standby { text-align: center; }
-dialog.standby p { margin: 4px 0 16px; font-size: 15px; }
+.saved-list { display: grid; gap: 6px; max-height: 184px; overflow-y: auto; }
+.saved-item {
+	display: flex; align-items: center; justify-content: space-between; gap: 12px;
+	min-height: 40px; padding: 0 14px; border-radius: 10px; text-align: left;
+	background: var(--card-2); box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; transition: background .15s;
+}
+.saved-item:hover { background: var(--hover); }
+.saved-item b { font-weight: 600; font-size: 14.5px; }
+.saved-item span { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .player { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 2px; }
 .avatar { width: 36px; height: 36px; border-radius: 10px; background-color: var(--card); box-shadow: var(--shadow); background-size: 86%; background-position: center; flex: none; }

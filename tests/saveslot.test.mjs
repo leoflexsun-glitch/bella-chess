@@ -1,122 +1,78 @@
-// 存档读写与"同一时刻只有一页在下"的交接（两个句柄共用一个存储，模拟两个标签页）。
+// 存档：每局一条，各标签页只写自己的那条（两个句柄共用 localStorage、各有一份 sessionStorage，模拟两个标签页）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSaveSlot } from '../src/game/saveslot.js';
-import { createTabLock } from '../src/game/tablock.js';
+import { createSaveSlots } from '../src/game/saveslot.js';
 
-// 共享存储 + storage 事件：写入时通知"别的标签页"（不通知写入者自己），与浏览器一致。
-function browser() {
-	const data = new Map(), tabs = [];
-	const storage = writer => ({
-		getItem: k => data.get(k) ?? null,
-		setItem: (k, v) => { data.set(k, String(v)); notify(writer, k); },
-		removeItem: k => { data.delete(k); notify(writer, k); },
-		clear: () => { data.clear(); notify(writer, null); }
-	});
-	const notify = (writer, key) => { for (const t of tabs) if (t !== writer) t.listeners.forEach(fn => fn({ key })); };
+function memory() {
+	const data = new Map();
 	return {
-		open() {
-			const t = { listeners: [] };
-			tabs.push(t);
-			t.storage = storage(t);
-			t.events = { addEventListener: (type, fn) => { if (type === 'storage') t.listeners.push(fn); } };
-			return t;
-		}
+		get length() { return data.size; },
+		key: i => [...data.keys()][i] ?? null,
+		getItem: k => data.get(k) ?? null,
+		setItem: (k, v) => data.set(k, String(v)),
+		removeItem: k => data.delete(k)
 	};
 }
+const game = n => ({ fen: 'start', moves: Array(n).fill('e2e4') });
+let t = 0;
+const tick = () => ++t;                 // 每次存档时间各不相同
 
-test('存档：读、写、终局标记；坏数据与存储不可用时按没有存档处理', () => {
-	const tab = browser().open(), slot = createSaveSlot(tab.storage);
-	assert.deepEqual([slot.load(), slot.finished], [null, false], '空存档不等于"已下完"');
-	assert.ok(slot.save({ fen: 'start', moves: ['e2e4'] }));
-	assert.deepEqual([slot.load().moves, slot.finished], [['e2e4'], false]);
-	assert.ok(slot.finish());
-	assert.deepEqual([slot.load(), slot.finished], [null, true]);
-	tab.storage.setItem('frostfall.game', '{"fen":1}');
-	assert.equal(slot.load(), null);
-	const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
-	const b = createSaveSlot(broken);
-	assert.equal(b.load(), null);
-	assert.equal(b.save({ fen: 'start', moves: [] }), false);
+test('两页各下各的：互不覆盖，各自刷新回到自己那局', () => {
+	const local = memory(), sa = memory(), sb = memory();
+	const a = createSaveSlots({ storage: local, session: sa }), b = createSaveSlots({ storage: local, session: sb });
+	a.begin(); a.save(game(3));
+	b.begin(); b.save(game(5));
+	const a2 = createSaveSlots({ storage: local, session: sa }), b2 = createSaveSlots({ storage: local, session: sb });
+	assert.equal(a2.get(a2.previous).moves.length, 3);
+	assert.equal(b2.get(b2.previous).moves.length, 5);
 });
 
-test('交接：后接手的页拿到"在下"，先前那页收到通知转为待命；回来再接手', () => {
-	const br = browser(), a = br.open(), b = br.open();
-	const lost = [];
-	const la = createTabLock({ storage: a.storage, events: a.events, onLost: () => lost.push('a') });
-	const lb = createTabLock({ storage: b.storage, events: b.events, onLost: () => lost.push('b') });
-	assert.equal(la.claim(), false, '第一次接手：之前不是本页');
-	assert.deepEqual([la.held, lb.held], [true, false]);
-	assert.equal(lb.claim(), false);
-	assert.deepEqual([la.held, lb.held, lost], [false, true, ['a']]);
-	assert.equal(la.claim(), false, '回来接手：之前是 B 在下，要重新读存档');
-	assert.deepEqual([la.held, lb.held, lost], [true, false, ['a', 'b']]);
-	assert.equal(la.claim(), true, '本来就是本页在下：不必重读');
-	assert.deepEqual(lost, ['a', 'b'], '重复接手不打扰别人');
+test('新开的页：没有"本页上一局"，列表里列出各局（新的在前），选一局后挪到本页名下', () => {
+	const local = memory(), a = createSaveSlots({ storage: local, session: memory(), now: tick });
+	a.begin(); a.save(game(1));
+	a.begin(); a.save(game(2));            // 本页又开一局：上一局留在列表里
+	const c = createSaveSlots({ storage: local, session: memory() });
+	assert.equal(c.previous, null);
+	const list = c.list();
+	assert.deepEqual(list.map(e => e.game.moves.length), [2, 1]);
+	c.begin(list[1].key);
+	assert.equal(c.get(list[1].key), null, '原来那条已挪走');
+	assert.deepEqual(c.list().map(e => e.game.moves.length), [2], '列表不含本页正在下的这局');
+	c.save(game(4));
+	a.save(game(3));                       // 原页接着下它那局：写的是它自己的键
+	assert.equal(c.get(c.previous).moves.length, 4, '互不覆盖');
 });
 
-test('错过了通知（标签页被冻结等）：check 现读存储发现并转为待命；回来接手时知道要重读', () => {
-	const br = browser(), a = br.open(), b = br.open();
-	let lost = 0;
-	const la = createTabLock({ storage: a.storage, events: {}, onLost: () => lost++ });   // A 收不到 storage 事件
-	const lb = createTabLock({ storage: b.storage, events: b.events });
-	la.claim();
-	lb.claim();
-	assert.equal(la.held, true, '缓存还以为在下');
-	assert.equal(la.check(), false, '现读发现已不是');
-	assert.deepEqual([la.held, lost], [false, 1]);
-	assert.equal(la.check(), false);
-	assert.equal(lost, 1, '只通知一次');
-	assert.equal(la.claim(), false, 'A 回来接手时知道要重读存档');
+test('下完从列表删掉；悔棋接着下再存回来', () => {
+	const local = memory(), s = memory(), a = createSaveSlots({ storage: local, session: s });
+	a.begin(); a.save(game(2));
+	a.finish();
+	assert.equal(createSaveSlots({ storage: local, session: s }).previous, null);
+	assert.equal(createSaveSlots({ storage: local, session: memory() }).list().length, 0);
+	a.save(game(1));
+	assert.equal(createSaveSlots({ storage: local, session: memory() }).list().length, 1);
 });
 
-test('某次写入临时失败后，一旦收到别的页的通知就不再"独占"', () => {
-	const br = browser(), a = br.open(), b = br.open();
-	let fail = true, lost = 0;
-	const flaky = { ...a.storage, setItem: (k, v) => { if (fail) throw new Error('QuotaExceededError'); a.storage.setItem(k, v); } };
-	const la = createTabLock({ storage: flaky, events: a.events, onLost: () => lost++ });
-	const lb = createTabLock({ storage: b.storage, events: b.events });
-	la.claim();
-	assert.equal(la.check(), true, '写不进去时算本页在下');
-	fail = false;
-	lb.claim();                                                   // B 接手，A 收到通知
-	assert.deepEqual([la.check(), lost], [false, 1]);
+test('最多留 8 局；坏数据不列出；旧版单一存档并入列表', () => {
+	const local = memory();
+	local.setItem('frostfall.game', JSON.stringify(game(7)));
+	local.setItem('frostfall.active', '"x"');
+	local.setItem('frostfall.game.bad', '{"fen":1}');
+	const a = createSaveSlots({ storage: local, session: memory(), now: tick });
+	assert.deepEqual(a.list().map(e => e.game.moves.length), [7]);
+	assert.equal(local.getItem('frostfall.game'), null);
+	assert.equal(local.getItem('frostfall.active'), null);
+	for (let i = 0; i < 10; i++) { a.begin(); a.save(game(i + 1)); }
+	const left = createSaveSlots({ storage: local, session: memory() }).list().map(e => e.game.moves.length);
+	assert.deepEqual(left, [10, 9, 8, 7, 6, 5, 4, 3, 2], '留下最新的：本页这局 + 之前 8 局');
 });
 
-test('交接：别的键变化不影响；存储被整个清空时本页接着下（重新登记并通知重新存档）', () => {
-	const br = browser(), a = br.open(), b = br.open();
-	let lost = 0, cleared = 0;
-	const la = createTabLock({ storage: a.storage, events: a.events, onLost: () => lost++, onCleared: () => cleared++ });
-	la.claim();
-	b.storage.setItem('frostfall.game', '{}');
-	assert.deepEqual([la.held, lost], [true, 0]);
-	b.storage.clear();
-	assert.deepEqual([la.held, la.check(), lost, cleared], [true, true, 0, 1], '没有别的页接手：不转待命');
-	const lb = createTabLock({ storage: b.storage, events: b.events });
-	assert.equal(lb.held, false);
-	assert.equal(lb.claim(), false, '重新登记后，别的页要接手仍按正常交接');
-	assert.deepEqual([la.held, lost], [false, 1]);
-});
-
-test('存储中途变得读不出也写不进：重新登记不会无限递归', () => {
-	const tab = browser().open();
-	let broken = false;
-	const storage = {
-		getItem: k => broken ? null : tab.storage.getItem(k),
-		setItem: (k, v) => { if (broken) throw new Error('denied'); tab.storage.setItem(k, v); },
-		removeItem: k => { if (broken) throw new Error('denied'); tab.storage.removeItem(k); }
-	};
-	let cleared = 0;
-	const lock = createTabLock({ storage, events: tab.events, onCleared: () => { cleared++; lock.check(); } });
-	lock.claim();
-	broken = true;
-	assert.deepEqual([lock.check(), lock.held, cleared], [true, true, 1]);
-});
-
-test('存储不可用时只有本页，接手照样成功', () => {
-	const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
-	const lock = createTabLock({ storage: broken, events: {} });
-	assert.equal(lock.claim(), false);
-	assert.deepEqual([lock.held, lock.check()], [true, true]);
-	assert.equal(lock.claim(), true);
+test('存储不可用：不报错，按没有存档处理', () => {
+	const broken = { get length() { throw new Error('denied'); }, key() { throw new Error('denied'); }, getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
+	const a = createSaveSlots({ storage: broken, session: broken });
+	assert.equal(a.previous, null);
+	assert.deepEqual(a.list(), []);
+	a.begin();
+	assert.equal(a.save(game(1)), false);
+	a.finish();
 });
