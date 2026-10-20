@@ -20,23 +20,31 @@ const escapeHtml = text => String(text).replace(/[&<>"]/g, c => ({ '&': '&amp;',
 export function createShell({ onAction, onSetting, onMoveClick }) {
 	const toastBox = $('toast');
 	const movesList = $('moves');
-	let movesKey = null;
+	let movesKey = null;       // 棋谱内容（不含当前步）
+	let movesCur = null;       // 当前高亮的半步
+	let pinned = true;         // 当前步是否在可见区：用户手动翻到别处时为 false，尺寸变化就不再把它拽回来
 
+	// 当前步相对棋谱区的越界量（可见时为 0）。没有高亮项只可能是看起始局面（或还没走棋）：以开头为准。
+	function overflow() {
+		const cur = movesList.querySelector('.cur');
+		if (!cur) return { y: -movesList.scrollTop, x: -movesList.scrollLeft };
+		const box = movesList.getBoundingClientRect(), r = cur.getBoundingClientRect();
+		return {
+			y: Math.min(0, r.top - box.top) + Math.max(0, r.bottom - box.bottom),
+			x: Math.min(0, r.left - box.left) + Math.max(0, r.right - box.right)
+		};
+	}
 	// 把当前步滚进棋谱区可见范围。只滚动棋谱列表本身（桌面竖排、手机横排，两个方向都处理）：
 	// scrollIntoView 会连带滚动整页，手机上终局时会把棋盘顶行拖到标题栏下。
 	function scrollToCurrent() {
-		const cur = movesList.querySelector('.cur');
-		if (!cur) {
-			// 没有高亮项只可能是看起始局面（或还没走棋）：回到开头
-			movesList.scrollTop = 0;
-			movesList.scrollLeft = 0;
-			return;
-		}
-		const box = movesList.getBoundingClientRect(), r = cur.getBoundingClientRect();
-		movesList.scrollTop += Math.min(0, r.top - box.top) + Math.max(0, r.bottom - box.bottom);
-		movesList.scrollLeft += Math.min(0, r.left - box.left) + Math.max(0, r.right - box.right);
+		const d = overflow();
+		movesList.scrollTop += d.y;
+		movesList.scrollLeft += d.x;
+		pinned = true;
 	}
-	if (typeof ResizeObserver === 'function') new ResizeObserver(scrollToCurrent).observe(movesList);
+	movesList.addEventListener('scroll', () => { const d = overflow(); pinned = Math.abs(d.x) < 2 && Math.abs(d.y) < 2; }, { passive: true });
+	// 棋谱区大小变了（复盘条、结算卡出现，窗口缩放、横竖屏切换）：当前步原本可见就让它继续可见。
+	if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (pinned) scrollToCurrent(); }).observe(movesList);
 	let toastTimer = 0;
 
 	// 所有 data-act 按钮（顶栏、侧栏、弹窗里）统一派发。
@@ -84,12 +92,20 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 
 		// history：对局记录；current：高亮的半步序号（-1 表示起始局面）。
 		setMoves(history, current) {
-			// refresh 很频繁（每次点选都有）：内容没变就不重建列表、不重算滚动——实测这能省下点选耗时的一半以上。
-			// 列表内容完全由"当前步 + 首步的回合号与执子方 + 各步着法"决定（之后的编号、执子方依次交替）。
-			// 内容没变但棋谱区大小变了（复盘条、结算卡出现，窗口缩放）由上面的 ResizeObserver 重新滚动。
-			const key = `${current}|${history[0]?.no}|${history[0]?.mover}|${history.map(h => h.san).join(' ')}`;
-			if (key === movesKey) return;
+			// refresh 很频繁（每次点选都有）：内容没变就不重建列表——实测这能省下点选耗时的一半以上；
+			// 只换了当前步（复盘）就只挪高亮。列表内容完全由"首步的回合号与执子方 + 各步着法"决定
+			// （之后的编号、执子方依次交替）。内容没变但棋谱区大小变了，由上面的 ResizeObserver 处理。
+			const key = `${history[0]?.no}|${history[0]?.mover}|${history.map(h => h.san).join(' ')}`;
+			if (key === movesKey) {
+				if (current === movesCur) return;
+				movesList.querySelector('.cur')?.classList.remove('cur');
+				movesList.querySelector(`[data-ply="${current}"]`)?.classList.add('cur');
+				movesCur = current;
+				scrollToCurrent();
+				return;
+			}
 			movesKey = key;
+			movesCur = current;
 			$('moves-empty').hidden = history.length > 0;
 			const rows = [];
 			let row = null;
@@ -131,6 +147,9 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 				if (disabled !== undefined) el.disabled = disabled;
 			}
 		},
+
+		// 待命遮罩：这盘棋正在另一个窗口里下时盖住棋盘，提供"在此继续"。
+		setStandby(on) { $('standby').hidden = !on; },
 
 		// 设备不支持的设置项整行隐藏（如没有震动马达）。
 		hideSetting(key) {

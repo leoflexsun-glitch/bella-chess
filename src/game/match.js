@@ -293,6 +293,8 @@ export function createMatch(hooks = {}) {
 				: `[SetUp "1"]\n[FEN "${state.startFen}"]\n\n`;
 			return `${header}${moves ? moves + ' ' : ''}${result()}`;
 		},
+		// 暂停：停下正在进行的思考（标签页转为待命时）。恢复时由调用方重新 restore。
+		pause() { cancelThinking(); },
 		dispose() { cancelThinking(); worker.terminate(); }
 	};
 }
