@@ -66,11 +66,13 @@
 	overflow: hidden;
 }
 
-.b2d-marks, .b2d-coords, .b2d-pieces, .b2d-promo { position: absolute; inset: 0; }
-.b2d-coords, .b2d-marks { pointer-events: none; }
+.b2d-marks, .b2d-fx, .b2d-coords, .b2d-pieces, .b2d-promo { position: absolute; inset: 0; }
+.b2d-coords, .b2d-marks, .b2d-fx { pointer-events: none; }
+/* 层级铁律：标记(0) < 特效(1) = 箭头(1) < 棋子(2+)。动效永远不压在棋子上。 */
+.b2d-fx { z-index: 1; }
 
 /* 每个格内元素：12.5% 见方，靠 --x/--y 平移整格。 */
-.b2d .pc, .b2d .mk, .promo-choice {
+.b2d .pc, .b2d .mk, .b2d .fx, .promo-choice {
 	position: absolute;
 	left: 0;
 	top: 0;
@@ -100,17 +102,51 @@
 	filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .3));
 }
 .b2d .pc.snap { transition: none; }
-.b2d .pc.gone { opacity: 0; transform: translate(calc(var(--x) * 100%), calc(var(--y) * 100%)) scale(.6); transition: opacity 160ms ease, transform 160ms ease; }
+/* 被吃的棋子只淡出，不缩放不变形；新出现的（悔棋复原）只淡入。 */
+.b2d .pc.gone { opacity: 0; transition: opacity 150ms ease; }
+.b2d .pc.appear { animation: pc-in 180ms ease-out; }
+@keyframes pc-in { from { opacity: 0; } }
 
 /* ── 高亮 ─────────────────────────────────────────────────── */
 
 .mk.last { background: var(--hl-last); }
+.mk.last.fresh { animation: mk-in 200ms ease-out; }
+@keyframes mk-in { from { opacity: 0; } }
 .mk.sel { background: var(--hl-sel); }
 .mk.dot { background: radial-gradient(circle, var(--hint) 0 17%, transparent 18%); }
 .mk.cap { background: radial-gradient(circle, transparent 0 79%, var(--hint) 80%); }
 .mk.check { background: radial-gradient(circle, rgba(255, 30, 0, .95) 0, rgba(231, 0, 0, .55) 32%, rgba(169, 0, 0, 0) 72%); }
 .mk.hover { box-shadow: inset 0 0 0 max(2px, .6cqi) rgba(255, 255, 255, .75); }
 .mk.warn { box-shadow: inset 0 0 0 max(2px, .55cqi) #f08a24; background: rgba(240, 138, 36, .18); }
+/* 终局：胜方王格金色底光，负方王格灰暗，和棋两王淡光——都在棋子下面。 */
+.mk.win { background: radial-gradient(circle, rgba(255, 206, 72, .95) 0, rgba(255, 190, 40, .45) 40%, rgba(255, 190, 40, 0) 72%); }
+.mk.lose { background: radial-gradient(circle, rgba(40, 40, 40, .42) 0, rgba(40, 40, 40, 0) 70%); }
+.mk.draw { background: radial-gradient(circle, rgba(255, 255, 255, .6) 0, rgba(255, 255, 255, 0) 70%); }
+
+/* ── 一次性特效（特效层，棋子之下，播完自删） ───────────────── */
+
+/* 特效要做 scale 动画，而 scale 会连 transform 里的平移一起放大（光圈会漂离格子），
+   所以特效改用 left/top 定位，缩放始终以格心为原点。 */
+.b2d .fx { left: calc(var(--x) * 12.5%); top: calc(var(--y) * 12.5%); transform: none; }
+
+/* 吃子：一圈柔光波纹从格心扩散。 */
+.fx-capture {
+	background: radial-gradient(circle, transparent 0 34%, rgba(255, 255, 255, .7) 42%, rgba(255, 255, 255, 0) 64%);
+	animation: fx-ripple 360ms ease-out forwards;
+}
+@keyframes fx-ripple { from { opacity: 1; scale: .5; } to { opacity: 0; scale: 1.35; } }
+/* 将军：王格红光脉冲两次，之后留下常亮的将军标记。 */
+.fx-check {
+	background: radial-gradient(circle, rgba(255, 40, 20, .95) 0, rgba(255, 0, 0, .5) 38%, rgba(255, 0, 0, 0) 74%);
+	animation: fx-pulse 820ms ease-out forwards;
+}
+@keyframes fx-pulse { 0% { opacity: 0; scale: .8; } 25% { opacity: 1; scale: 1.2; } 50% { opacity: .35; scale: 1; } 75% { opacity: 1; scale: 1.2; } 100% { opacity: 0; scale: 1.3; } }
+/* 胜利：王格金光呼吸两次。 */
+.fx-win {
+	background: radial-gradient(circle, rgba(255, 214, 90, 1) 0, rgba(255, 196, 40, .5) 42%, rgba(255, 196, 40, 0) 76%);
+	animation: fx-glow 1.4s ease-in-out 2 forwards;
+}
+@keyframes fx-glow { 0%, 100% { opacity: 0; scale: .9; } 50% { opacity: 1; scale: 1.45; } }
 
 /* ── 坐标：写在边框上，对准各列/行中心 ───────────────────── */
 
@@ -129,7 +165,7 @@
 /* ── 提示箭头 ─────────────────────────────────────────────── */
 
 /* 显式覆盖全局 svg 图标样式（描边宽 1.7 在 8×8 视口里会变成一大团）。 */
-.b2d-arrows { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; overflow: visible; fill: none; stroke: none; }
+.b2d-arrows { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; overflow: visible; fill: none; stroke: none; }
 .b2d-arrows line { stroke: rgba(21, 120, 27, .8); stroke-width: .17; stroke-linecap: round; }
 .b2d-arrows polygon { fill: rgba(21, 120, 27, .8); stroke: none; }
 
@@ -149,4 +185,6 @@
 
 @media (prefers-reduced-motion: reduce) {
 	.b2d .pc { transition: none; }
+	.b2d .fx { display: none; }
+	.mk.last.fresh, .b2d .pc.appear { animation: none; }
 }

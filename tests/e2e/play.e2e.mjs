@@ -12,8 +12,12 @@ import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const { chromium } = await import(process.env.PLAYWRIGHT_PATH || 'playwright');
 
-// 只服务一个文件：发布形态就是单个 index.html。
+// 发布形态就是单个 index.html；另外放出 src/core 下的模块，供音频这类单元级场景直接导入。
 const server = createServer(async (req, res) => {
+	if (/^\/src\/core\/[\w-]+\.js$/.test(req.url)) {
+		res.writeHead(200, { 'content-type': 'text/javascript' }).end(await readFile(path.join(root, req.url)));
+		return;
+	}
 	if (req.url !== '/' && !req.url.startsWith('/index.html')) { res.writeHead(404).end(); return; }
 	res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(await readFile(path.join(root, 'index.html')));
 });
@@ -42,7 +46,7 @@ async function scenario(name, viewport, fn) {
 
 // 0x88 无关：这里用代数坐标换算屏幕坐标，自动考虑棋盘翻转。
 async function point(page, square, selector = '#board2d .b2d') {
-	const box = await page.locator(selector).boundingBox();
+	const box = await page.locator(`${selector} .b2d-grid`).boundingBox();   // 格子区，不含外框
 	const flipped = await page.evaluate(sel => document.querySelector(`${sel} .cf`)?.textContent === 'h', selector);
 	let f = square.charCodeAt(0) - 97, r = 8 - Number(square[1]);
 	if (flipped) { f = 7 - f; r = 7 - r; }
@@ -191,6 +195,65 @@ await scenario('托管环境禁止 worker：电脑改在主线程思考，照样
 	assert.equal((await moves(page))[0], 'd4');
 });
 
+// 特效铁律：任何动效都不能遮挡棋子。测试时让特效/标记/箭头层也参与命中检测，
+// 动画进行中逐个检查棋子中心，命中的必须是棋子本身。
+async function assertPiecesUnobscured(page, label) {
+	const bad = await page.evaluate(() => {
+		const out = [];
+		for (const el of document.querySelectorAll('#board2d .b2d-pieces .pc:not(.gone):not(.moving)')) {
+			const r = el.getBoundingClientRect();
+			const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+			if (hit !== el) out.push(`${el.dataset.p} 被 ${hit?.className?.baseVal ?? hit?.className} 遮挡`);
+		}
+		return out;
+	});
+	assert.deepEqual(bad, [], `${label}：${bad.join('；')}`);
+}
+const exposeEffects = page => page.addStyleTag({ content: '.b2d-fx, .b2d-fx *, .b2d-marks, .b2d-marks *, .b2d-arrows, .b2d-arrows * { pointer-events: auto !important; }' });
+
+await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金光、提示箭头', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	// 白车 e1 吃 e4 并将军 e8：两个特效都不在 a8 角上，缩放漂移才测得出来
+	await page.evaluate(() => localStorage.setItem('frostfall.game', JSON.stringify({ fen: '4k3/8/8/8/4r3/8/8/4R1K1 w - - 0 1', moves: [], human: 8, level: 'novice' })));
+	await page.reload();
+	await exposeEffects(page);
+	await click(page, 'e1');
+	await click(page, 'e4');
+	const seen = new Set();
+	for (const t of [40, 140, 260, 420]) {
+		await page.waitForTimeout(t === 40 ? 40 : 110);
+		for (const c of await page.$$eval('#board2d .fx', els => els.map(e => e.className))) seen.add(c);
+		await assertPiecesUnobscured(page, `吃子+将军 ${t}ms`);
+		// 动画中特效中心必须一直对准目标格中心
+		const drift = await page.evaluate(() => {
+			const g = document.querySelector('#board2d .b2d-grid').getBoundingClientRect(), s = g.width / 8;
+			return [...document.querySelectorAll('#board2d .fx')].map(el => {
+				const r = el.getBoundingClientRect(), x = +el.style.getPropertyValue('--x'), y = +el.style.getPropertyValue('--y');
+				return Math.hypot(r.left + r.width / 2 - (g.left + (x + .5) * s), r.top + r.height / 2 - (g.top + (y + .5) * s)) / s;
+			});
+		});
+		assert.ok(drift.every(d => d < .05), `${t}ms 特效偏离格心 ${drift.map(d => d.toFixed(2))} 格`);
+	}
+	assert.ok([...seen].some(c => c.includes('fx-capture')), '应出现吃子波纹');
+	assert.ok([...seen].some(c => c.includes('fx-check')), '应出现将军脉冲');
+
+	// 一步杀：Qh8#，胜方王格金光
+	await page.evaluate(() => localStorage.setItem('frostfall.game', JSON.stringify({ fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice' })));
+	await page.reload();
+	await exposeEffects(page);
+	await page.keyboard.press('h');                      // 提示箭头（应在棋子之下）
+	await page.waitForSelector('#board2d .b2d-arrows line', { timeout: 8000 });
+	await assertPiecesUnobscured(page, '提示箭头');
+	await click(page, 'h1');
+	await click(page, 'h8');
+	await page.waitForSelector('#board2d .fx-win', { timeout: 3000 });
+	for (let i = 0; i < 4; i++) { await page.waitForTimeout(250); await assertPiecesUnobscured(page, `胜利金光 ${i}`); }
+	assert.ok(await page.locator('#board2d .mk.win').count() === 1, '胜方王格应有金色底光');
+	assert.match(await page.textContent('[data-slot=result-stats]'), /共 1 回合 · 用时 \d+:\d\d · 吃子 0 次/);
+	assert.equal(await page.textContent('[data-slot=status]'), '对局结束', '状态行不重复结算标题');
+	assert.equal(await page.textContent('[data-slot=eval-text]'), '终局 1-0', '终局显示比分而不是过期的引擎分');
+});
+
 await scenario('设置：棋盘主题与棋子套装', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
 	await page.click('#dlg-new [data-act="start"]');
@@ -202,7 +265,8 @@ await scenario('设置：棋盘主题与棋子套装', { width: 1280, height: 80
 	assert.equal(await page.evaluate(() => document.body.dataset.board), 'mist', '设置应持久化');
 });
 
-await scenario('手机：触屏拖拽走子', { width: 390, height: 844 }, async (page, ctx) => {
+await scenario('手机：触屏拖拽走子、震动反馈与开关', { width: 390, height: 844 }, async (page, ctx) => {
+	await page.addInitScript(() => { window.vib = []; navigator.vibrate = p => { window.vib.push(p); return true; }; });
 	await fresh(page);
 	await page.click('#dlg-new [data-act="start"]');
 	const cdp = await ctx.newCDPSession(page);
@@ -213,6 +277,45 @@ await scenario('手机：触屏拖拽走子', { width: 390, height: 844 }, async
 	await touch('touchEnd');
 	await waitMoves(page, 1);
 	assert.equal((await moves(page))[0], 'Nf3');
+	await waitMoves(page, 2);
+	assert.deepEqual(await page.evaluate(() => window.vib), [8, 8], '人和电脑各走一步，各轻震一下');
+	await page.click('[data-act="settings"]');
+	await page.click('#dlg-settings [data-setting="haptics"] [data-value="off"]');
+	await page.evaluate(() => { window.vib = []; });
+	await page.keyboard.press('Escape');
+	await click(page, 'e2'); await click(page, 'e4');
+	await waitMoves(page, 4);
+	assert.deepEqual(await page.evaluate(() => window.vib), [], '关掉震动后不应再震');
+});
+
+// 音效离线渲染：每声不削波；同一上下文里第一声与后续落子音量一致（曾因压限器初始状态，开局第一声小约 11 dB）。
+await scenario('音效：不削波、第一声不偏小', { width: 800, height: 600 }, async page => {
+	await page.goto(URL);
+	const r = await page.evaluate(async () => {
+		const { createAudio } = await import('/src/core/audio.js');
+		const offline = () => {
+			const off = new OfflineAudioContext(1, 44100 * 3, 44100);
+			off.go = off.resume.bind(off);
+			off.resume = () => Promise.resolve();          // 由这里在排好声音后再继续渲染
+			window.AudioContext = function () { return off; };
+			return off;
+		};
+		const peak = (d, a = 0, b = d.length) => { let p = 0; for (let i = a; i < b; i++) p = Math.max(p, Math.abs(d[i])); return p; };
+		const loud = {};
+		for (const [name, arg] of [['place'], ['capture'], ['castle'], ['promote'], ['check'], ['start'], ['end', 'win'], ['end', 'lose'], ['deny']]) {
+			const off = offline();
+			createAudio()[name](arg);
+			loud[name + (arg ? '-' + arg : '')] = peak((await off.startRendering()).getChannelData(0));
+		}
+		const off = offline(), a = createAudio(), times = [0.5, 1, 2];
+		a.place();
+		for (const t of times) off.suspend(t).then(() => { a.place(); off.go(); });
+		const d = (await off.startRendering()).getChannelData(0), cut = [0, ...times, 3].map(t => t * 44100);
+		return { loud, seq: cut.slice(0, -1).map((c, i) => 20 * Math.log10(peak(d, c, cut[i + 1]))) };
+	});
+	for (const [k, p] of Object.entries(r.loud)) assert.ok(p > 0.01 && p < 0.9, `${k} 峰值 ${p.toFixed(3)} 应在 (0.01, 0.9)`);
+	const spread = Math.max(...r.seq) - Math.min(...r.seq);
+	assert.ok(spread < 3, `连续落子音量差 ${spread.toFixed(1)} dB（${r.seq.map(v => v.toFixed(1))}）`);
 });
 
 await browser.close();

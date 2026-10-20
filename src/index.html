@@ -80,6 +80,7 @@
 			<div class="card result-card" data-slot="result" hidden>
 				<p class="result-title" data-slot="result-title"></p>
 				<p class="result-sub" data-slot="result-sub"></p>
+				<p class="result-stats" data-slot="result-stats"></p>
 				<div class="row">
 					<button class="btn primary" data-act="rematch">再来一局</button>
 					<button class="btn" data-act="takeback">悔棋接着下</button>
@@ -166,7 +167,11 @@
 		</div>
 		<div class="field two">
 			<div><label>声音</label><div class="seg" data-setting="sound"><button type="button" data-value="on">开</button><button type="button" data-value="off">关</button></div></div>
-			<div><label>视图</label><div class="seg" data-setting="view"><button type="button" data-value="2d">2D</button><button type="button" data-value="3d">3D 雪林</button></div></div>
+			<div><label>震动（手机）</label><div class="seg" data-setting="haptics"><button type="button" data-value="on">开</button><button type="button" data-value="off">关</button></div></div>
+		</div>
+		<div class="field">
+			<label>视图</label>
+			<div class="seg" data-setting="view"><button type="button" data-value="2d">2D</button><button type="button" data-value="3d">3D 雪林</button></div>
 		</div>
 		<div class="only3d">
 			<div class="field two">

@@ -1,7 +1,7 @@
 // 控制器：对局流程、选子与走子、设置、视图切换。
 // 视图（2D 棋盘 / 3D 雪林）只负责显示与把指针动作翻译成意图，二者接口一致、可随时互换。
 
-import { WHITE, BLACK, CAPTURE, fromFen, inCheck, colorOf, sanOf, START_FEN } from './chess/engine.js';
+import { WHITE, BLACK, CAPTURE, KCASTLE, QCASTLE, fromFen, inCheck, colorOf, sanOf, other, START_FEN } from './chess/engine.js';
 import { balance } from './chess/material.js';
 import { createMatch } from './game/match.js';
 import { createBoard2d } from './view2d/board.js';
@@ -10,6 +10,7 @@ import { createView3d } from './view3d/view3d.js';
 import { createShell } from './ui/shell.js';
 import { loadSettings, saveSettings, saveGame, loadGame } from './ui/settings.js';
 import { createAudio } from './core/audio.js';
+import { createHaptics } from './core/haptics.js';
 import { createEditor } from './editor/editor.js';
 import { createPhoto } from './editor/photo.js';
 import * as vision from './vision/index.js';
@@ -28,6 +29,8 @@ const REASON_TEXT = {
 const settings = loadSettings();
 const audio = createAudio();
 audio.enabled = settings.sound === 'on';
+const haptics = createHaptics();
+haptics.enabled = settings.haptics === 'on';
 const body = document.body;
 
 // ── 状态 ────────────────────────────────────────────────────────
@@ -41,6 +44,9 @@ let reviewPly = null;      // 正在查看的历史半步；null = 当前局面
 let flipped = false;
 let resignArmed = 0;
 let hintArrow = null;      // 电脑给出的提示着法 { from, to }，走子或悔棋后清除
+let animateReset = false;  // 下一次整盘同步用平滑过渡（悔棋时）
+let startedAt = Date.now(); // 本局开始时间（结算显示用时）
+let endedAt = 0;
 
 const shell = createShell({ onAction: handleAction, onSetting: changeSetting, onMoveClick: reviewTo });
 
@@ -57,7 +63,8 @@ const view2d = {
 	kind: '2d',
 	show(pos) { board2d.setPosition(pos); },
 	hide() { board2d.cancelPromotion(); },
-	setPosition: pos => board2d.setPosition(pos),
+	setPosition: (pos, opts) => board2d.setPosition(pos, opts),
+	pulse: (sq, kind) => board2d.pulse(sq, kind),
 	playMove: (move, after) => board2d.playMove(move, after),
 	setMarks: marks => board2d.setMarks(marks),
 	setFlipped: on => board2d.setFlipped(on),
@@ -80,25 +87,39 @@ const match = createMatch({
 		clearSelection();
 		hintArrow = null;
 		reviewPly = null;
-		view.setPosition(match.state.pos);
+		endedAt = 0;
+		view.setPosition(match.state.pos, { animate: animateReset });
+		animateReset = false;
 		refresh();
 	},
 	onTurn: (color, check) => {
-		if (check) audio.check();
+		if (check) {
+			audio.check();
+			haptics.check();
+			if (reviewPly === null) view.pulse?.(match.state.pos.kings[color >> 3], 'check');
+		}
 		refresh();
 	},
 	onMove: (move, { mover, captured }) => {
 		hintArrow = null;
 		if (reviewPly === null) view.playMove(move, match.state.pos);
-		if (captured) audio.capture(); else audio.place();
+		if (move.flags & (KCASTLE | QCASTLE)) audio.castle();
+		else if (move.promotion) audio.promote();
+		else if (captured) audio.capture();
+		else audio.place();
+		if (captured) haptics.capture(); else haptics.move();
 		if (mover !== match.state.human) clearSelection();
 		refresh();
 	},
 	onThink: () => refresh(),
 	onEnd: over => {
 		clearSelection();
-		const won = over.winner === match.state.human;
-		audio.end(won);
+		endedAt = Date.now();
+		const result = !over.winner ? 'draw' : over.winner === match.state.human ? 'win' : 'lose';
+		audio.end(result);
+		haptics.end(result);
+		// 胜方王格金光呼吸（在棋子下面，不挡棋子）。
+		if (over.winner && reviewPly === null) view.pulse?.(match.state.pos.kings[over.winner >> 3], 'win');
 		refresh();
 	},
 	onError: message => shell.toast(message)
@@ -127,7 +148,8 @@ function refresh() {
 		selected,
 		targets: settings.hints === 'on' ? legal.map(m => ({ sq: m.to, capture: Boolean(m.flags & CAPTURE) })) : [],
 		check: checked,
-		arrow: reviewPly === null ? hintArrow : null
+		arrow: reviewPly === null ? hintArrow : null,
+		result: reviewPly === null && s.over ? resultMarks(s) : null
 	});
 
 	// 玩家栏：下方是靠近自己的一侧
@@ -149,13 +171,13 @@ function refresh() {
 
 	// 状态行
 	if (!playing) shell.setStatus('选择对局方式开始');
-	else if (s.over) shell.setStatus(resultText(s.over).title);
 	else if (reviewPly !== null) shell.setStatus('正在复盘');
+	else if (s.over) shell.setStatus('对局结束');            // 胜负写在下面的结算卡里，这里不重复
 	else if (s.thinking) shell.setStatus('电脑思考中…');
 	else if (s.pos.turn === s.human) shell.setStatus(checked >= 0 ? '将军！轮到你走' : '轮到你走', { check: checked >= 0 });
 	else shell.setStatus(`轮到${SIDE[s.pos.turn]}`);
 
-	shell.setEval(s.eval);
+	shell.setEval(s.eval, s.over && (s.over.winner === WHITE ? '1-0' : s.over.winner === BLACK ? '0-1' : '½-½'));
 	shell.setMoves(s.history, reviewPly === null ? s.history.length - 1 : reviewPly);
 	shell.setReview(reviewPly === null ? null
 		: reviewPly < 0 ? `起始局面 · 共 ${s.history.length} 步` : `第 ${reviewPly + 1} / ${s.history.length} 步`);
@@ -169,18 +191,28 @@ function refresh() {
 	persist();
 }
 
+// 终局时王格底光：胜方金色、负方灰暗、和棋两王淡光。
+function resultMarks(s) {
+	const king = color => s.pos.kings[color >> 3];
+	if (!s.over.winner) return { draw: [king(WHITE), king(BLACK)] };
+	return { win: king(s.over.winner), lose: king(other(s.over.winner)) };
+}
+
 function resultText(over) {
 	const s = match.state;
 	const reason = REASON_TEXT[over.reason] || over.reason;
-	if (!over.winner) return { title: '和棋', sub: reason };
+	const secs = Math.max(0, Math.round(((endedAt || Date.now()) - startedAt) / 1000));
+	const captures = s.history.filter(h => h.captured).length;
+	const stats = `共 ${Math.ceil(s.history.length / 2)} 回合 · 用时 ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} · 吃子 ${captures} 次`;
+	if (!over.winner) return { title: '和棋', sub: reason, stats };
 	const won = over.winner === s.human;
-	return { title: won ? '你赢了！' : '你输了', sub: `${SIDE[over.winner]}胜 · ${reason}` };
+	return { title: won ? '你赢了！' : '你输了', sub: `${SIDE[over.winner]}胜 · ${reason}`, stats };
 }
 
 function persist() {
 	const s = match.state;
 	if (!playing || s.over) { saveGame(null); return; }
-	saveGame({ fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped });
+	saveGame({ fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, startedAt });
 }
 
 // ── 选子与走子（两个视图共用） ───────────────────────────────────
@@ -261,7 +293,9 @@ function startGame({ human, level = settings.level, fen = START_FEN }) {
 	flipped = human === BLACK;
 	view.setFlipped(flipped);
 	shell.close('dlg-new');
+	startedAt = Date.now();
 	match.newGame({ human, level, fen });
+	audio.start();
 }
 
 function resolveSide(side) {
@@ -271,11 +305,16 @@ function resolveSide(side) {
 
 function takeBack() {
 	if (!playing) return;
-	reviewPly = null;
-	view.setPosition(match.state.pos);
 	if (promoting) { board2d.cancelPromotion(); shell.close('dlg-promo'); }
-	if (match.undo(1)) shell.toast('已悔棋', 1200);
-	else { audio.deny(); shell.toast('没有可以悔的棋'); }
+	const wasReviewing = reviewPly !== null;
+	reviewPly = null;
+	// 悔棋时棋子平滑滑回原位，而不是瞬间跳变。
+	animateReset = true;
+	if (match.undo(1)) { shell.toast('已悔棋', 1200); return; }
+	animateReset = false;
+	if (wasReviewing) { view.setPosition(match.state.pos, { animate: true }); refresh(); }
+	audio.deny();
+	shell.toast('没有可以悔的棋');
 }
 
 function reviewTo(ply) {
@@ -284,7 +323,7 @@ function reviewTo(ply) {
 	const next = Math.max(-1, Math.min(s.history.length - 1, ply));
 	clearSelection();
 	reviewPly = next === s.history.length - 1 ? null : next;
-	view.setPosition(currentPos());
+	view.setPosition(currentPos(), { animate: true });
 	refresh();
 }
 
@@ -375,6 +414,7 @@ function applySetting(key) {
 	if (key === 'board' || key === 'pieces' || key === 'coords') body.dataset[key] = v;
 	if (key === 'board') applyBoardTexture(v);
 	else if (key === 'sound') audio.enabled = v === 'on';
+	else if (key === 'haptics') { haptics.enabled = v === 'on'; if (v === 'on') haptics.move(); }
 	else if (key === 'hints') refresh();
 	else if (key === 'view') setView(v);
 	else if (key === 'quality') view3d.setQuality(v);
@@ -426,6 +466,7 @@ const saved = loadGame();
 if (saved) {
 	playing = true;
 	flipped = Boolean(saved.flipped);
+	startedAt = Number(saved.startedAt) || Date.now();
 	view.setFlipped(flipped);
 	match.restore(saved);
 	if (match.state.history.length) shell.toast('已恢复上一局', 1800);

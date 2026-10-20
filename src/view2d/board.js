@@ -22,8 +22,10 @@ export function createBoard2d(host, intents = {}) {
 	root.setAttribute('role', 'img');
 	root.setAttribute('aria-label', '棋盘');
 	// 外层是边框（坐标写在边框上），内层网格才是 8×8 棋格；所有坐标换算都以网格为准。
-	root.innerHTML = '<div class="b2d-coords"></div><div class="b2d-grid"><div class="b2d-marks"></div><div class="b2d-pieces"></div>' +
-		'<svg class="b2d-arrows" viewBox="0 0 8 8" aria-hidden="true"></svg><div class="b2d-promo" hidden></div></div>';
+	// 图层自下而上：标记 → 特效 → 提示箭头 → 棋子 → 升变选择。
+	// 特效与箭头一律压在棋子下面：任何动效都不能遮挡或改变棋子的样子。
+	root.innerHTML = '<div class="b2d-coords"></div><div class="b2d-grid"><div class="b2d-marks"></div><div class="b2d-fx"></div>' +
+		'<svg class="b2d-arrows" viewBox="0 0 8 8" aria-hidden="true"></svg><div class="b2d-pieces"></div><div class="b2d-promo" hidden></div></div>';
 	host.append(root);
 
 	const grid = root.querySelector('.b2d-grid');
@@ -33,6 +35,7 @@ export function createBoard2d(host, intents = {}) {
 	const piecesLayer = root.querySelector('.b2d-pieces');
 	const promoLayer = root.querySelector('.b2d-promo');
 	const arrowLayer = root.querySelector('.b2d-arrows');
+	const fxLayer = root.querySelector('.b2d-fx');
 
 	let flipped = false;
 	let pieces = new Map();       // sq -> 元素
@@ -43,6 +46,7 @@ export function createBoard2d(host, intents = {}) {
 	let drag = null;
 	let hoverSq = -1;
 	let promoFinish = null;
+	let lastKey = '';            // 上一步变化时才播放落点淡入，避免每次刷新都闪
 
 	const xy = sq => {
 		const f = sq & 15, r = sq >> 4;
@@ -58,6 +62,7 @@ export function createBoard2d(host, intents = {}) {
 	function makePiece(piece, sq) {
 		const el = document.createElement('i');
 		el.className = `pc ${pieceCode(piece)}`;
+		el.dataset.p = pieceCode(piece);
 		place(el, sq);
 		return el;
 	}
@@ -95,7 +100,11 @@ export function createBoard2d(host, intents = {}) {
 			const [x, y] = xy(sq);
 			out.push(`<i class="mk ${cls}" style="--x:${x};--y:${y}"></i>`);
 		};
-		if (marks.lastMove) { add(marks.lastMove.from, 'last'); add(marks.lastMove.to, 'last'); }
+		const key = marks.lastMove ? `${marks.lastMove.from}-${marks.lastMove.to}` : '';
+		const fresh = key && key !== lastKey ? ' fresh' : '';
+		lastKey = key;
+		if (marks.lastMove) { add(marks.lastMove.from, 'last' + fresh); add(marks.lastMove.to, 'last' + fresh); }
+		if (marks.result) { add(marks.result.win, 'win'); add(marks.result.lose, 'lose'); for (const sq of marks.result.draw || []) add(sq, 'draw'); }
 		add(marks.selected, 'sel');
 		for (const sq of marks.warn || []) add(sq, 'warn');
 		add(marks.check, 'check');
@@ -118,6 +127,61 @@ export function createBoard2d(host, intents = {}) {
 		arrowLayer.innerHTML =
 			`<line x1="${x1}" y1="${y1}" x2="${baseX}" y2="${baseY}"/>` +
 			`<polygon points="${tipX},${tipY} ${baseX + nx},${baseY + ny} ${baseX - nx},${baseY - ny}"/>`;
+	}
+
+	// 一次性特效（吃子波纹、将军脉冲、胜利底光），画在特效层，播完自删。
+	function pulse(sq, kind) {
+		if (sq == null || sq < 0) return;
+		const [x, y] = xy(sq);
+		const el = document.createElement('i');
+		el.className = `fx fx-${kind}`;
+		el.style.setProperty('--x', x);
+		el.style.setProperty('--y', y);
+		fxLayer.append(el);
+		const done = () => el.remove();
+		el.addEventListener('animationend', done, { once: true });
+		setTimeout(done, 4000);   // 兜底（如后台标签页不触发动画事件）；须长于最长的特效（胜利金光 2.8 秒）
+	}
+
+	// 平滑过渡到任意局面（悔棋、复盘浏览）：同位同子不动；同种棋子就近滑过去；
+	// 多出的淡出、缺的淡入。全程棋子形状不变，只是移动。
+	function animateTo(next) {
+		cancelDrag();
+		clearTimeout(settleTimer);
+		board = Int8Array.from(next.board ?? next);
+		const have = new Map(pieces);
+		const nextMap = new Map();
+		const rest = [];
+		for (let sq = 0; sq < 128; sq++) {
+			if (sq & 0x88 || !board[sq]) continue;
+			const code = pieceCode(board[sq]);
+			const el = have.get(sq);
+			if (el && el.dataset.p === code) { nextMap.set(sq, el); have.delete(sq); }
+			else rest.push({ sq, code });
+		}
+		for (const { sq, code } of rest) {
+			let best = -1, bestD = 99;
+			for (const [from, el] of have) {
+				if (el.dataset.p !== code) continue;
+				const d = Math.max(Math.abs((from & 15) - (sq & 15)), Math.abs((from >> 4) - (sq >> 4)));
+				if (d < bestD) { bestD = d; best = from; }
+			}
+			let el;
+			if (best >= 0) {
+				el = have.get(best);
+				have.delete(best);
+				place(el, sq);
+				el.classList.add('moving');
+			} else {
+				el = makePiece(board[sq], sq);
+				el.classList.add('appear');
+				piecesLayer.append(el);
+			}
+			nextMap.set(sq, el);
+		}
+		for (const el of have.values()) el.classList.add('gone');
+		pieces = nextMap;
+		settle();
 	}
 
 	function settle(after) {
@@ -245,13 +309,15 @@ export function createBoard2d(host, intents = {}) {
 		squareAt,
 		squareSize: () => grid.getBoundingClientRect().width / 8,
 
-		// 直接摆到某局面（board 为 0x88 数组或带 board 字段的局面）。
-		setPosition(next) {
+		// 摆到某局面（board 为 0x88 数组或带 board 字段的局面）；animate 时棋子平滑滑过去。
+		setPosition(next, { animate = false } = {}) {
+			if (animate && pieces.size) { animateTo(next); return; }
 			board = Int8Array.from(next.board ?? next);
 			clearTimeout(settleTimer);
 			animating = 0;
 			render();
 		},
+		pulse,
 
 		// 播放一步棋；after 为走完后的局面，动画落定后据此对账。
 		playMove(move, after) {
@@ -264,6 +330,7 @@ export function createBoard2d(host, intents = {}) {
 			if (victim && victim !== el) {
 				victim.classList.add('gone');
 				pieces.delete(victimSq);
+				pulse(victimSq, 'capture');
 			}
 
 			const wasDragged = el.classList.contains('drag');
@@ -285,7 +352,10 @@ export function createBoard2d(host, intents = {}) {
 				const rook = pieces.get(rf);
 				if (rook) { pieces.delete(rf); pieces.set(rt, rook); place(rook, rt); rook.classList.add('moving'); }
 			}
-			if (move.promotion) el.className = `pc moving ${pieceCode(move.promotion | colorOf(move.piece))}`;
+			if (move.promotion) {
+				el.className = `pc moving ${pieceCode(move.promotion | colorOf(move.piece))}`;
+				el.dataset.p = pieceCode(move.promotion | colorOf(move.piece));
+			}
 			settle();
 		},
 

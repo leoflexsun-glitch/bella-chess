@@ -150,7 +150,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 .result-card { border: 2px solid var(--accent); }
 .result-title { font-size: 20px; font-weight: 700; }
-.result-sub { color: var(--muted); margin: 2px 0 12px; }
+.result-sub { color: var(--muted); margin: 2px 0 2px; }
+.result-stats { color: var(--muted); font: 500 12.5px var(--mono); margin-bottom: 12px; }
+/* 结算卡入场：从下方轻轻浮起（在侧栏里，不碰棋盘）。 */
+.result-card:not([hidden]) { animation: card-in 360ms cubic-bezier(.2, .9, .3, 1.2); }
+@keyframes card-in { from { opacity: 0; transform: translateY(10px) scale(.98); } }
 
 .moves-card { flex: 1; min-height: 120px; display: flex; flex-direction: column; padding: 8px; overflow: hidden; }
 .moves { list-style: none; overflow-y: auto; flex: 1; font: 500 14px var(--mono); }
