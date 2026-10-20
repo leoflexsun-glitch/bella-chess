@@ -108,6 +108,12 @@ export function createMatch(hooks = {}) {
 	}
 
 	// 净子力分：正数表示该方多子。
+	// 比分（PGN 记法）：'1-0' / '0-1' / '1/2-1/2'，未结束为 '*'。
+	function result() {
+		if (!state.over) return '*';
+		return state.over.winner === WHITE ? '1-0' : state.over.winner === BLACK ? '0-1' : '1/2-1/2';
+	}
+
 	function tally() {
 		const b = balance(state.pos);
 		return { [WHITE]: b[WHITE].score, [BLACK]: b[BLACK].score };
@@ -185,8 +191,9 @@ export function createMatch(hooks = {}) {
 	}
 
 	// 界面已同步到 state 之后，告诉它轮到谁；轮到电脑就开想。
-	function announce() {
-		hooks.onReset?.();
+	// reason：'new' 新开一局 / 'restore' 恢复存档 / 'undo' 悔棋。界面据此决定是否平滑过渡。
+	function announce(reason) {
+		hooks.onReset?.(reason);
 		if (state.over) { hooks.onEnd?.(state.over); return; }
 		hooks.onTurn?.(state.pos.turn, inCheck(state.pos));
 		if (state.pos.turn !== state.human) think();
@@ -198,7 +205,7 @@ export function createMatch(hooks = {}) {
 		// fen：从任意局面开局（摆棋编辑器/拍照复刻），调用方负责先用 setup.prepare() 校验。
 		newGame(options = {}) {
 			reset(options);
-			announce();
+			announce('new');
 		},
 
 		// 恢复存档：从起始局面静默重放 UCI 着法，任何一步对不上就停在那里。
@@ -211,7 +218,7 @@ export function createMatch(hooks = {}) {
 				commit(move, {}, true);
 			}
 			state.eval = evaluate(state.pos) / 100 * (state.pos.turn === WHITE ? 1 : -1);
-			announce();
+			announce('restore');
 		},
 
 		// 替人类算一步好棋；done(move | null)。负数 id 与对手搜索的序号互不冲突。
@@ -256,7 +263,7 @@ export function createMatch(hooks = {}) {
 				state.repeats.set(key, (state.repeats.get(key) || 0) + 1);
 			}
 			state.eval = evaluate(state.pos) / 100 * (state.pos.turn === WHITE ? 1 : -1);
-			announce();
+			announce('undo');
 			return true;
 		},
 
@@ -277,10 +284,8 @@ export function createMatch(hooks = {}) {
 		moves: () => state.history.map(h => uciOf(h.move)),
 
 		tally,
+		result,
 		pgn() {
-			const result = state.over
-				? state.over.winner === WHITE ? '1-0' : state.over.winner === BLACK ? '0-1' : '1/2-1/2'
-				: '*';
 			const moves = state.history.map((h, i) => {
 				if (h.mover === WHITE) return `${h.no}. ${h.san}`;
 				return i === 0 ? `${h.no}... ${h.san}` : h.san;
@@ -288,7 +293,7 @@ export function createMatch(hooks = {}) {
 			// 非标准开局按 PGN 规范带上起始局面，其他软件才能正确复现。
 			const header = state.startFen === START_FEN ? ''
 				: `[SetUp "1"]\n[FEN "${state.startFen}"]\n\n`;
-			return `${header}${moves ? moves + ' ' : ''}${result}`;
+			return `${header}${moves ? moves + ' ' : ''}${result()}`;
 		},
 		dispose() { cancelThinking(); worker.terminate(); }
 	};

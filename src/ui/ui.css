@@ -372,3 +372,8 @@ body[data-view="3d"] .moves li:nth-child(odd) { background: rgba(255, 255, 255, 
 	.tbtn { padding: 0 9px; }
 	.screen .tbtn span { display: inline; }
 }
+
+/* 系统开了"减少动态效果"：结算卡、对话框直接出现，不做浮起动画。 */
+@media (prefers-reduced-motion: reduce) {
+	.result-card:not([hidden]), dialog.sheet[open] { animation: none; }
+}

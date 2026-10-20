@@ -44,9 +44,16 @@ let reviewPly = null;      // 正在查看的历史半步；null = 当前局面
 let flipped = false;
 let resignArmed = 0;
 let hintArrow = null;      // 电脑给出的提示着法 { from, to }，走子或悔棋后清除
-let animateReset = false;  // 下一次整盘同步用平滑过渡（悔棋时）
-let startedAt = Date.now(); // 本局开始时间（结算显示用时）
-let endedAt = 0;
+
+// 对局用时：只计开着页面下棋的时间；关页期间、结算画面都停表。
+const clock = {
+	spent: 0,
+	since: 0,                  // 本段开始计时的时刻；0 = 停表
+	start(spent = 0) { this.spent = spent; this.since = Date.now(); },
+	resume() { this.since ||= Date.now(); },
+	stop() { this.spent = this.read(); this.since = 0; },
+	read() { return this.spent + (this.since ? Date.now() - this.since : 0); }
+};
 
 const shell = createShell({ onAction: handleAction, onSetting: changeSetting, onMoveClick: reviewTo });
 
@@ -83,38 +90,39 @@ let view = view2d;
 // ── 对局 ────────────────────────────────────────────────────────
 
 const match = createMatch({
-	onReset: () => {
+	onReset: reason => {
 		clearSelection();
 		hintArrow = null;
 		reviewPly = null;
-		endedAt = 0;
-		view.setPosition(match.state.pos, { animate: animateReset });
-		animateReset = false;
+		// 悔棋时棋子平滑滑回原位；新开局、恢复存档直接摆好。
+		view.setPosition(match.state.pos, { animate: reason === 'undo' });
+		clock.resume();            // 终局后悔棋接着下，接着计时
 		refresh();
 	},
-	onTurn: (color, check) => {
-		if (check) {
-			audio.check();
-			haptics.check();
-			if (reviewPly === null) view.pulse?.(match.state.pos.kings[color >> 3], 'check');
-		}
-		refresh();
-	},
+	onTurn: () => refresh(),
 	onMove: (move, { mover, captured }) => {
+		const s = match.state;
+		const live = reviewPly === null;
 		hintArrow = null;
-		if (reviewPly === null) view.playMove(move, match.state.pos);
+		if (live) view.playMove(move, s.pos);
 		if (move.flags & (KCASTLE | QCASTLE)) audio.castle();
 		else if (move.promotion) audio.promote();
 		else if (captured) audio.capture();
 		else audio.place();
 		if (captured) haptics.capture(); else haptics.move();
+		// 将军提示只在真走出将军时给（悔棋、恢复存档不重复提醒）；将杀由终局接手。
+		if (!s.over && inCheck(s.pos)) {
+			audio.check();
+			haptics.check();
+			if (live) view.pulse?.(s.pos.kings[s.pos.turn >> 3], 'check');
+		}
 		if (mover !== match.state.human) clearSelection();
 		refresh();
 	},
 	onThink: () => refresh(),
 	onEnd: over => {
 		clearSelection();
-		endedAt = Date.now();
+		clock.stop();
 		const result = !over.winner ? 'draw' : over.winner === match.state.human ? 'win' : 'lose';
 		audio.end(result);
 		haptics.end(result);
@@ -177,7 +185,7 @@ function refresh() {
 	else if (s.pos.turn === s.human) shell.setStatus(checked >= 0 ? '将军！轮到你走' : '轮到你走', { check: checked >= 0 });
 	else shell.setStatus(`轮到${SIDE[s.pos.turn]}`);
 
-	shell.setEval(s.eval, s.over && (s.over.winner === WHITE ? '1-0' : s.over.winner === BLACK ? '0-1' : '½-½'));
+	shell.setEval(s.eval, s.over ? match.result() : null);
 	shell.setMoves(s.history, reviewPly === null ? s.history.length - 1 : reviewPly);
 	shell.setReview(reviewPly === null ? null
 		: reviewPly < 0 ? `起始局面 · 共 ${s.history.length} 步` : `第 ${reviewPly + 1} / ${s.history.length} 步`);
@@ -201,9 +209,11 @@ function resultMarks(s) {
 function resultText(over) {
 	const s = match.state;
 	const reason = REASON_TEXT[over.reason] || over.reason;
-	const secs = Math.max(0, Math.round(((endedAt || Date.now()) - startedAt) / 1000));
+	const secs = Math.round(clock.read() / 1000);
 	const captures = s.history.filter(h => h.captured).length;
-	const stats = `共 ${Math.ceil(s.history.length / 2)} 回合 · 用时 ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} · 吃子 ${captures} 次`;
+	// 回合按棋谱编号算：从黑方先走的局面开局时，半步数除以 2 会少算一回合。
+	const rounds = s.history.length ? s.history.at(-1).no - s.history[0].no + 1 : 0;
+	const stats = `共 ${rounds} 回合 · 用时 ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} · 吃子 ${captures} 次`;
 	if (!over.winner) return { title: '和棋', sub: reason, stats };
 	const won = over.winner === s.human;
 	return { title: won ? '你赢了！' : '你输了', sub: `${SIDE[over.winner]}胜 · ${reason}`, stats };
@@ -212,7 +222,7 @@ function resultText(over) {
 function persist() {
 	const s = match.state;
 	if (!playing || s.over) { saveGame(null); return; }
-	saveGame({ fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, startedAt });
+	saveGame({ fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() });
 }
 
 // ── 选子与走子（两个视图共用） ───────────────────────────────────
@@ -272,6 +282,7 @@ function attempt(from, to) {
 		promoting = true;
 		refresh();
 		view.askPromotion(to, color).then(type => {
+			if (!promoting) return;   // 已被悔棋或新对局收走，棋盘由它们同步
 			promoting = false;
 			if (type) match.play(from, to, type);
 			else { view.setPosition(match.state.pos); refresh(); }
@@ -287,13 +298,13 @@ function attempt(from, to) {
 // 任何入口（新对局、再来一局、摆棋、拍照复刻）都是一盘全新的对局：
 // 先收掉上一局遗留的升变选择、复盘位置，再交给 match 清空棋谱。
 function startGame({ human, level = settings.level, fen = START_FEN }) {
-	if (promoting) { board2d.cancelPromotion(); shell.close('dlg-promo'); }
+	dropPromotion();
 	reviewPly = null;
 	playing = true;
 	flipped = human === BLACK;
 	view.setFlipped(flipped);
 	shell.close('dlg-new');
-	startedAt = Date.now();
+	clock.start();
 	match.newGame({ human, level, fen });
 	audio.start();
 }
@@ -303,15 +314,20 @@ function resolveSide(side) {
 	return side === 'b' ? BLACK : WHITE;
 }
 
+// 收掉等待中的升变选择（悔棋、新对局时）；随后的棋盘同步由调用方负责。
+function dropPromotion() {
+	if (!promoting) return;
+	promoting = false;
+	board2d.cancelPromotion();
+	shell.close('dlg-promo');
+}
+
 function takeBack() {
 	if (!playing) return;
-	if (promoting) { board2d.cancelPromotion(); shell.close('dlg-promo'); }
+	dropPromotion();
 	const wasReviewing = reviewPly !== null;
 	reviewPly = null;
-	// 悔棋时棋子平滑滑回原位，而不是瞬间跳变。
-	animateReset = true;
 	if (match.undo(1)) { shell.toast('已悔棋', 1200); return; }
-	animateReset = false;
 	if (wasReviewing) { view.setPosition(match.state.pos, { animate: true }); refresh(); }
 	audio.deny();
 	shell.toast('没有可以悔的棋');
@@ -459,6 +475,8 @@ const photo = createPhoto({
 // ── 启动 ─────────────────────────────────────────────────────────
 
 for (const key of ['board', 'pieces', 'coords']) body.dataset[key] = settings[key];
+// 不支持震动的设备（如 iPhone 的 Safari）不显示震动开关，免得开了没反应。
+document.querySelector('[data-setting="haptics"]').parentElement.hidden = !haptics.supported;
 applyBoardTexture(settings.board);
 shell.paintSettings(settings);
 
@@ -466,7 +484,7 @@ const saved = loadGame();
 if (saved) {
 	playing = true;
 	flipped = Boolean(saved.flipped);
-	startedAt = Number(saved.startedAt) || Date.now();
+	clock.start(Number(saved.elapsed) || 0);
 	view.setFlipped(flipped);
 	match.restore(saved);
 	if (match.state.history.length) shell.toast('已恢复上一局', 1800);

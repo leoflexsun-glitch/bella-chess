@@ -103,8 +103,6 @@ export function createAudio() {
 		set enabled(v) { on = v; },
 		get enabled() { return on; },
 
-		// 界面轻点：只有一声极轻的高频"嗒"。
-		tick() { const ac = ready(); if (ac) click(ac, { t: ac.currentTime, gain: 0.12, cutoff: 3200, dur: 0.004 }); },
 		lift() { knock({ pitch: 1.35, weight: 0.3, gain: 0.16 }); },
 		place() { knock({ gain: 0.55 }); },
 		// 吃子：先一记更沉的落子，紧接着被吃棋子离盘的轻响。

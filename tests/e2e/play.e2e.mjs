@@ -212,7 +212,16 @@ async function assertPiecesUnobscured(page, label) {
 const exposeEffects = page => page.addStyleTag({ content: '.b2d-fx, .b2d-fx *, .b2d-marks, .b2d-marks *, .b2d-arrows, .b2d-arrows * { pointer-events: auto !important; }' });
 
 await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金光、提示箭头', { width: 1280, height: 800 }, async page => {
+	await page.addInitScript(() => { window.vib = []; navigator.vibrate = p => { window.vib.push(p); return true; }; });
 	await fresh(page);
+	// 恢复一盘"正被将军"的存档：只显示将军标记，不重放将军脉冲、不震动
+	await page.evaluate(() => localStorage.setItem('frostfall.game', JSON.stringify({ fen: '4k3/8/8/8/4r3/8/8/4K3 w - - 0 1', moves: [], human: 8, level: 'novice' })));
+	await page.reload();
+	await page.waitForTimeout(300);
+	assert.equal(await page.locator('#board2d .mk.check').count(), 1, '被将军的王应有将军标记');
+	assert.equal(await page.locator('#board2d .fx-check').count(), 0, '恢复存档不应重放将军脉冲');
+	assert.deepEqual(await page.evaluate(() => window.vib), [], '恢复存档不应震动');
+
 	// 白车 e1 吃 e4 并将军 e8：两个特效都不在 a8 角上，缩放漂移才测得出来
 	await page.evaluate(() => localStorage.setItem('frostfall.game', JSON.stringify({ fen: '4k3/8/8/8/4r3/8/8/4R1K1 w - - 0 1', moves: [], human: 8, level: 'novice' })));
 	await page.reload();
@@ -220,8 +229,10 @@ await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金�
 	await click(page, 'e1');
 	await click(page, 'e4');
 	const seen = new Set();
-	for (const t of [40, 140, 260, 420]) {
-		await page.waitForTimeout(t === 40 ? 40 : 110);
+	let t = 0;
+	for (const at of [40, 150, 260, 370]) {
+		await page.waitForTimeout(at - t);
+		t = at;
 		for (const c of await page.$$eval('#board2d .fx', els => els.map(e => e.className))) seen.add(c);
 		await assertPiecesUnobscured(page, `吃子+将军 ${t}ms`);
 		// 动画中特效中心必须一直对准目标格中心
@@ -236,6 +247,7 @@ await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金�
 	}
 	assert.ok([...seen].some(c => c.includes('fx-capture')), '应出现吃子波纹');
 	assert.ok([...seen].some(c => c.includes('fx-check')), '应出现将军脉冲');
+	assert.deepEqual((await page.evaluate(() => window.vib)).slice(0, 2), [16, [12, 60, 12]], '吃子一震、将军两震');
 
 	// 一步杀：Qh8#，胜方王格金光
 	await page.evaluate(() => localStorage.setItem('frostfall.game', JSON.stringify({ fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice' })));
@@ -244,6 +256,8 @@ await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金�
 	await page.keyboard.press('h');                      // 提示箭头（应在棋子之下）
 	await page.waitForSelector('#board2d .b2d-arrows line', { timeout: 8000 });
 	await assertPiecesUnobscured(page, '提示箭头');
+	assert.equal(await page.locator('#board2d .mk.hint-from').count(), 1, '提示起点格应有绿框');
+	assert.equal(await page.locator('#board2d .mk.hint-to').count(), 1, '提示落点格应有绿框（吃子时箭头头部在棋子下）');
 	await click(page, 'h1');
 	await click(page, 'h8');
 	await page.waitForSelector('#board2d .fx-win', { timeout: 3000 });
@@ -252,6 +266,48 @@ await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金�
 	assert.match(await page.textContent('[data-slot=result-stats]'), /共 1 回合 · 用时 \d+:\d\d · 吃子 0 次/);
 	assert.equal(await page.textContent('[data-slot=status]'), '对局结束', '状态行不重复结算标题');
 	assert.equal(await page.textContent('[data-slot=eval-text]'), '终局 1-0', '终局显示比分而不是过期的引擎分');
+	// 金光还在播时翻转棋盘：特效是按翻转前的格子定位的，必须清掉
+	assert.equal(await page.locator('#board2d .fx-win').count(), 1, '此时金光应仍在播放');
+	await page.keyboard.press('f');
+	assert.equal(await page.locator('#board2d .fx').count(), 0, '翻转棋盘后旧特效应清掉（否则会错位）');
+});
+
+// 每步动画落定后棋盘会按真实局面对账重建；玩家这时正拖着子，不能被打断。
+await scenario('悔棋后立刻拖子：拖拽不被动画收尾打断', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	const [x1, y1] = await point(page, 'd2'), [x2, y2] = await point(page, 'd4');
+	await page.keyboard.press('u');                      // 棋子开始滑回，约 230ms 后对账
+	await page.mouse.move(x1, y1);
+	await page.mouse.down();
+	await page.mouse.move(x1, y1 - 20, { steps: 3 });
+	await page.waitForTimeout(400);                      // 拖着不放，跨过对账时刻
+	await page.mouse.move(x2, y2, { steps: 4 });
+	await page.mouse.up();
+	await waitMoves(page, 1);
+	assert.equal((await moves(page))[0], 'd4', '悔棋后立刻拖的这步应生效');
+});
+
+// 系统开了"减少动态效果"：特效不显示，被吃棋子不淡出，结算卡不浮起。
+await scenario('减少动态效果：特效与过渡全部关闭', { width: 1280, height: 800 }, async page => {
+	await page.emulateMedia({ reducedMotion: 'reduce' });
+	await fresh(page);
+	const style = await page.evaluate(() => {
+		const probe = (parent, cls) => { const el = document.createElement('i'); el.className = cls; parent.append(el); const cs = getComputedStyle(el); const r = { display: cs.display, transition: cs.transitionDuration, animation: cs.animationName }; el.remove(); return r; };
+		const card = document.querySelector('.result-card');
+		card.hidden = false;
+		const cardAnim = getComputedStyle(card).animationName;
+		card.hidden = true;
+		return {
+			fx: probe(document.querySelector('#board2d .b2d-fx'), 'fx fx-win').display,
+			gone: probe(document.querySelector('#board2d .b2d-pieces'), 'pc wP gone').transition,
+			card: cardAnim
+		};
+	});
+	assert.deepEqual(style, { fx: 'none', gone: '0s', card: 'none' });
 });
 
 await scenario('设置：棋盘主题与棋子套装', { width: 1280, height: 800 }, async page => {

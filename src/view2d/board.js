@@ -46,7 +46,7 @@ export function createBoard2d(host, intents = {}) {
 	let drag = null;
 	let hoverSq = -1;
 	let promoFinish = null;
-	let lastKey = '';            // 上一步变化时才播放落点淡入，避免每次刷新都闪
+	let stale = false;           // 动画落定时玩家正拖着子：对账推迟到放手后
 
 	const xy = sq => {
 		const f = sq & 15, r = sq >> 4;
@@ -69,6 +69,7 @@ export function createBoard2d(host, intents = {}) {
 
 	// 整盘重建（无动画）。悔棋、换局、切视图、动画结束对账都走这里，结果只取决于 board。
 	function render() {
+		stale = false;
 		cancelDrag();
 		const next = new Map();
 		const frag = document.createDocumentFragment();
@@ -100,16 +101,15 @@ export function createBoard2d(host, intents = {}) {
 			const [x, y] = xy(sq);
 			out.push(`<i class="mk ${cls}" style="--x:${x};--y:${y}"></i>`);
 		};
-		const key = marks.lastMove ? `${marks.lastMove.from}-${marks.lastMove.to}` : '';
-		const fresh = key && key !== lastKey ? ' fresh' : '';
-		lastKey = key;
-		if (marks.lastMove) { add(marks.lastMove.from, 'last' + fresh); add(marks.lastMove.to, 'last' + fresh); }
+		if (marks.lastMove) { add(marks.lastMove.from, 'last'); add(marks.lastMove.to, 'last'); }
 		if (marks.result) { add(marks.result.win, 'win'); add(marks.result.lose, 'lose'); for (const sq of marks.result.draw || []) add(sq, 'draw'); }
 		add(marks.selected, 'sel');
 		for (const sq of marks.warn || []) add(sq, 'warn');
 		add(marks.check, 'check');
 		for (const t of marks.targets || []) add(t.sq, t.capture ? 'cap' : 'dot');
 		add(hoverSq, 'hover');
+		// 箭头在棋子下面，吃子提示的箭头头部会被目标棋子挡住；起止格再各加一圈贴边绿框，方向一眼可读。
+		if (marks.arrow) { add(marks.arrow.from, 'hint-from'); add(marks.arrow.to, 'hint-to'); }
 		marksLayer.innerHTML = out.join('');
 		renderArrow(marks.arrow);
 	}
@@ -190,7 +190,8 @@ export function createBoard2d(host, intents = {}) {
 		settleTimer = setTimeout(() => {
 			animating = 0;
 			// 动画只是视觉；落定后无条件按真实局面重建一次，任何竞态都留不下残子。
-			render();
+			// 玩家正拖着子就先不重建（重建会打断拖拽），放手后补上。
+			if (drag) stale = true; else render();
 			after?.();
 		}, ANIM_MS + 40);
 	}
@@ -266,6 +267,8 @@ export function createBoard2d(host, intents = {}) {
 			el.style.transform = '';
 		}
 		renderMarks();
+		// 补上拖动期间推迟的对账；若已开始新动画或在等升变选择，由它们收尾。
+		if (stale && animating === 0 && promoLayer.hidden) render();
 	}
 
 	root.addEventListener('pointerup', event => endDrag(event, false));
@@ -311,6 +314,7 @@ export function createBoard2d(host, intents = {}) {
 
 		// 摆到某局面（board 为 0x88 数组或带 board 字段的局面）；animate 时棋子平滑滑过去。
 		setPosition(next, { animate = false } = {}) {
+			fxLayer.replaceChildren();   // 一次性特效属于旧局面，换局面就收掉
 			if (animate && pieces.size) { animateTo(next); return; }
 			board = Int8Array.from(next.board ?? next);
 			clearTimeout(settleTimer);
@@ -353,8 +357,9 @@ export function createBoard2d(host, intents = {}) {
 				if (rook) { pieces.delete(rf); pieces.set(rt, rook); place(rook, rt); rook.classList.add('moving'); }
 			}
 			if (move.promotion) {
-				el.className = `pc moving ${pieceCode(move.promotion | colorOf(move.piece))}`;
-				el.dataset.p = pieceCode(move.promotion | colorOf(move.piece));
+				const code = pieceCode(move.promotion | colorOf(move.piece));
+				el.className = `pc moving ${code}`;
+				el.dataset.p = code;
 			}
 			settle();
 		},
@@ -365,6 +370,7 @@ export function createBoard2d(host, intents = {}) {
 		setFlipped(on) {
 			if (flipped === on) return;
 			flipped = on;
+			fxLayer.replaceChildren();   // 特效按翻转前的格子定位，翻转后会错位
 			renderCoords();
 			render();
 			renderMarks();

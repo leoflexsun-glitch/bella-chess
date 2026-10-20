@@ -48,13 +48,13 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 		},
 
 		// pawns：白方视角的兵值分；超过 900 是搜索给出的将杀分。
-		// final：终局比分（'1-0' / '0-1' / '½-½'），给出时不再显示引擎分。
+		// final：终局比分（PGN 记法 '1-0' / '0-1' / '1/2-1/2'），给出时不再显示引擎分。
 		setEval(pawns, final = null) {
 			if (final) pawns = final === '1-0' ? 8 : final === '0-1' ? -8 : 0;
 			const mate = Math.abs(pawns) > 900;
 			const clamped = Math.max(-8, Math.min(8, pawns));
 			$('eval-fill').style.width = `${50 + (clamped / 8) * 46}%`;
-			$('eval-text').textContent = final ? `终局 ${final}`
+			$('eval-text').textContent = final ? `终局 ${final === '1/2-1/2' ? '½-½' : final}`
 				: mate ? `${pawns > 0 ? '白' : '黑'}方将杀在望`
 				: Math.abs(clamped) < 0.35 ? '均势'
 					: `${clamped > 0 ? '白' : '黑'} +${Math.abs(pawns).toFixed(1)}`;

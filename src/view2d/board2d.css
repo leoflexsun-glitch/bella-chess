@@ -110,12 +110,13 @@
 /* ── 高亮 ─────────────────────────────────────────────────── */
 
 .mk.last { background: var(--hl-last); }
-.mk.last.fresh { animation: mk-in 200ms ease-out; }
-@keyframes mk-in { from { opacity: 0; } }
 .mk.sel { background: var(--hl-sel); }
 .mk.dot { background: radial-gradient(circle, var(--hint) 0 17%, transparent 18%); }
 .mk.cap { background: radial-gradient(circle, transparent 0 79%, var(--hint) 80%); }
 .mk.check { background: radial-gradient(circle, rgba(255, 30, 0, .95) 0, rgba(231, 0, 0, .55) 32%, rgba(169, 0, 0, 0) 72%); }
+/* 提示着法起止格：贴边绿框（与箭头同色），落点更粗。和所有标记一样在棋子下面。 */
+.mk.hint-from { box-shadow: inset 0 0 0 max(2px, .45cqi) rgba(21, 120, 27, .55); }
+.mk.hint-to { box-shadow: inset 0 0 0 max(3px, .75cqi) rgba(21, 120, 27, .85); }
 .mk.hover { box-shadow: inset 0 0 0 max(2px, .6cqi) rgba(255, 255, 255, .75); }
 .mk.warn { box-shadow: inset 0 0 0 max(2px, .55cqi) #f08a24; background: rgba(240, 138, 36, .18); }
 /* 终局：胜方王格金色底光，负方王格灰暗，和棋两王淡光——都在棋子下面。 */
@@ -184,7 +185,7 @@
 .promo-choice .pc { width: 100%; height: 100%; position: static; transform: scale(.88); }
 
 @media (prefers-reduced-motion: reduce) {
-	.b2d .pc { transition: none; }
+	.b2d .pc, .b2d .pc.gone { transition: none; }
 	.b2d .fx { display: none; }
-	.mk.last.fresh, .b2d .pc.appear { animation: none; }
+	.b2d .pc.appear { animation: none; }
 }
