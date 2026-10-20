@@ -272,6 +272,22 @@ await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金�
 	assert.equal(await page.locator('#board2d .fx').count(), 0, '翻转棋盘后旧特效应清掉（否则会错位）');
 });
 
+// 结算统计：用时只计在页面上下棋的时间（存档里记的是已用时长）；回合按棋谱编号算。
+await scenario('结算统计：用时不含关页时间、黑先局面回合数', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	// 黑先局面：1... Kb8 已走（存档重放），轮到白方 2. Qg8#——两个半步跨两个回合编号。
+	// 存档已用 2 分 5 秒；startedAt 是旧版字段（一天前），不应再被当作开局时刻。
+	await page.evaluate(() => localStorage.setItem('frostfall.game', JSON.stringify({
+		fen: 'k7/8/1K6/8/8/8/8/6Q1 b - - 0 1', moves: ['a8b8'], human: 8, level: 'novice',
+		elapsed: 125000, startedAt: Date.now() - 86400000
+	})));
+	await page.reload();
+	await click(page, 'g1');
+	await click(page, 'g8');
+	await page.waitForSelector('[data-slot=result]:not([hidden])', { timeout: 3000 });
+	assert.match(await page.textContent('[data-slot=result-stats]'), /^共 2 回合 · 用时 2:0\d · 吃子 0 次$/);
+});
+
 // 每步动画落定后棋盘会按真实局面对账重建；玩家这时正拖着子，不能被打断。
 await scenario('悔棋后立刻拖子：拖拽不被动画收尾打断', { width: 1280, height: 800 }, async page => {
 	await fresh(page);

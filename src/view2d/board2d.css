@@ -114,9 +114,10 @@
 .mk.dot { background: radial-gradient(circle, var(--hint) 0 17%, transparent 18%); }
 .mk.cap { background: radial-gradient(circle, transparent 0 79%, var(--hint) 80%); }
 .mk.check { background: radial-gradient(circle, rgba(255, 30, 0, .95) 0, rgba(231, 0, 0, .55) 32%, rgba(169, 0, 0, 0) 72%); }
-/* 提示着法起止格：贴边绿框（与箭头同色），落点更粗。和所有标记一样在棋子下面。 */
-.mk.hint-from { box-shadow: inset 0 0 0 max(2px, .45cqi) rgba(21, 120, 27, .55); }
-.mk.hint-to { box-shadow: inset 0 0 0 max(3px, .75cqi) rgba(21, 120, 27, .85); }
+/* 提示着法起止格：贴边绿框（与箭头同色），落点更粗。和所有标记一样在棋子下面。
+   绿框内侧再衬一道浅色细线：绿框在浅格上显眼，浅线在深格（尤其豆绿主题的绿色深格）上显眼。 */
+.mk.hint-from { box-shadow: inset 0 0 0 max(2px, .45cqi) rgba(21, 120, 27, .75), inset 0 0 0 calc(max(2px, .45cqi) + 1.5px) rgba(255, 255, 255, .7); }
+.mk.hint-to { box-shadow: inset 0 0 0 max(3px, .75cqi) rgba(21, 120, 27, .9), inset 0 0 0 calc(max(3px, .75cqi) + 1.5px) rgba(255, 255, 255, .8); }
 .mk.hover { box-shadow: inset 0 0 0 max(2px, .6cqi) rgba(255, 255, 255, .75); }
 .mk.warn { box-shadow: inset 0 0 0 max(2px, .55cqi) #f08a24; background: rgba(240, 138, 36, .18); }
 /* 终局：胜方王格金色底光，负方王格灰暗，和棋两王淡光——都在棋子下面。 */
