@@ -8,7 +8,7 @@ import { createBoard2d } from './view2d/board.js';
 import { applyBoardTexture } from './view2d/texture.js';
 import { createView3d } from './view3d/view3d.js';
 import { createShell } from './ui/shell.js';
-import { loadSettings, saveSettings, saveGame, loadGame } from './ui/settings.js';
+import { loadSettings, saveSettings, saveGame, loadGame, saveOwner } from './ui/settings.js';
 import { createAudio } from './core/audio.js';
 import { createHaptics } from './core/haptics.js';
 import { createClock } from './core/clock.js';
@@ -70,7 +70,7 @@ const view2d = {
 	setMarks: marks => board2d.setMarks(marks),
 	setFlipped: on => board2d.setFlipped(on),
 	askPromotion: (to, color) => board2d.askPromotion(to, color),
-	isIdle: () => board2d.isIdle()
+
 };
 const view3d = createView3d({
 	canvas: document.getElementById('stage'),
@@ -92,7 +92,7 @@ const match = createMatch({
 		// 悔棋时棋子平滑滑回原位；新开局、恢复存档直接摆好。
 		view.setPosition(match.state.pos, { animate: reason === 'undo' });
 		syncClock();               // 终局后悔棋接着下，接着计时
-		persist({ claim: true });  // 恢复存档也认领：旧版存档借此补上 id，终局时才能清掉
+		persist({ claim: true });  // 恢复存档也认领：此后本页的存档、终局清档才算数
 		refresh();
 	},
 	onMove: (move, { mover, captured }) => {
@@ -117,7 +117,7 @@ const match = createMatch({
 			else haptics.move();
 		}
 		if (mover !== match.state.human) clearSelection();
-		persist({ claim: true });
+		persist({ claim: mover === match.state.human });   // 电脑应着不是人的操作，不抢存档位
 		refresh();
 	},
 	onThink: () => refresh(),
@@ -126,7 +126,7 @@ const match = createMatch({
 		clearSelection();
 		syncClock();
 		persist();
-		const result = !over.winner ? 'draw' : over.winner === match.state.human ? 'win' : 'lose';
+		const result = outcome(over);
 		audio.end(result);
 		haptics.end(result);
 		// 胜方王格金光呼吸（在棋子下面，不挡棋子）。
@@ -216,25 +216,30 @@ function resultText(over) {
 	// 回合按棋谱编号算：从黑方先走的局面开局时，半步数除以 2 会少算一回合。
 	const rounds = s.history.length ? s.history.at(-1).no - s.history[0].no + 1 : 0;
 	const stats = `共 ${rounds} 回合 · 用时 ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} · 吃子 ${captures} 次`;
-	if (!over.winner) return { title: '和棋', sub: reason, stats };
-	const won = over.winner === s.human;
-	return { title: won ? '你赢了！' : '你输了', sub: `${SIDE[over.winner]}胜 · ${reason}`, stats };
+	const result = outcome(over);
+	if (result === 'draw') return { title: '和棋', sub: reason, stats };
+	return { title: result === 'win' ? '你赢了！' : '你输了', sub: `${SIDE[over.winner]}胜 · ${reason}`, stats };
 }
 
-// 存档。几个标签页共用一个存档位，每局带 id：
-// claim（走子、新开局、悔棋等真实操作）总是写入——存档位留给最近在下的那盘；
-// 其余时机（切后台、关页、终局清档）只动空存档位或本局自己的，免得旧标签页覆盖或清掉别的页刚下的棋。
-let gameId = '';
-const newGameId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+// 本局对人而言的结局：'win' / 'lose' / 'draw'（音效、震动、结算文案共用）。
+function outcome(over) {
+	if (!over.winner) return 'draw';
+	return over.winner === match.state.human ? 'win' : 'lose';
+}
+
+// 存档。几个标签页共用一个存档位，并记着它的主人（最近以真实操作写入的标签页）：
+// claim（人走子、新开局、悔棋、恢复存档）总是写入并成为主人；
+// 其余时机（电脑应着、切后台、关页、终局清档）只在本页仍是主人时才动——
+// 旧标签页不会覆盖、清掉或复活别的页刚下的棋。
+const tabId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 function persist({ claim = false } = {}) {
 	if (!playing) return;
 	const s = match.state;
-	const slot = loadGame();
-	const mine = slot?.id === gameId;
+	const mine = saveOwner() === tabId;
 	if (s.over) { if (mine) saveGame(null); return; }
-	if (claim || mine || !slot) {
-		saveGame({ id: gameId, fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() });
+	if (claim || mine) {
+		saveGame({ fen: s.startFen, moves: match.moves(), human: s.human, level: s.level, flipped, elapsed: clock.read() }, tabId);
 	}
 }
 
@@ -320,7 +325,6 @@ function attempt(from, to) {
 // 先收掉上一局遗留的升变选择、复盘位置，再交给 match 清空棋谱。
 function startGame({ human, level = settings.level, fen = START_FEN }) {
 	reviewPly = null;
-	gameId = newGameId();
 	playing = true;
 	flipped = human === BLACK;
 	view.setFlipped(flipped);
@@ -381,6 +385,7 @@ function askHint() {
 }
 
 function flip() {
+	dropPromotion();           // 升变选择框按翻转前的格子排布，翻转后会错位
 	flipped = !flipped;
 	view.setFlipped(flipped);
 	refresh();
@@ -515,7 +520,6 @@ shell.paintSettings(settings);
 const saved = loadGame();
 if (saved) {
 	playing = true;
-	gameId = saved.id || newGameId();       // 旧版存档没有 id：恢复后认领时补上
 	flipped = Boolean(saved.flipped);
 	clock.start(saved.elapsed);             // restore 之后的 onReset 会按可见性决定是否计时
 	view.setFlipped(flipped);

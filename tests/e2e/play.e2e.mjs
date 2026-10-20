@@ -32,9 +32,12 @@ let passed = 0;
 
 async function scenario(name, viewport, fn) {
 	const ctx = await browser.newContext({ viewport, isMobile: viewport.width < 600, hasTouch: viewport.width < 600 });
+	// 场景里另开的标签页（多标签页场景）也要收集页面错误
+	ctx.on('page', page => {
+		page.on('pageerror', e => errors.push(`${name}: ${e.message}`));
+		page.on('console', m => { if (m.type() === 'error') errors.push(`${name}: ${m.text()}`); });
+	});
 	const page = await ctx.newPage();
-	page.on('pageerror', e => errors.push(`${name}: ${e.message}`));
-	page.on('console', m => { if (m.type() === 'error') errors.push(`${name}: ${m.text()}`); });
 	try {
 		await fn(page, ctx);
 		passed++;
@@ -339,6 +342,23 @@ await scenario('升变待选时悔棋失败：兵回到原格', { width: 1280, h
 	assert.ok(await page.locator('#board2d .mk.dot').count() >= 1, 'e7 的兵应能再次选中');
 });
 
+// 手机上棋谱是横排的一条：最新一步要滚进可见区，看起始局面时回到最左。
+await scenario('手机横排棋谱：当前着法始终可见', { width: 375, height: 667 }, async page => {
+	await fresh(page);
+	await reloadWith(page, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', human: 8, level: 'novice', moves: [
+		'b2b4', 'd7d6', 'c1b2', 'h7h6', 'b2c3', 'a7a6', 'c3d4', 'b8c6', 'd4a7', 'h8h7', 'g1f3', 'c6b4', 'f3g1', 'd8d7', 'a2a3', 'd7h3',
+		'a7b8', 'h3e3', 'a3b4', 'e8d8', 'a1a5', 'e3c5', 'f2f3', 'c8f5', 'd2d4', 'c5c3', 'b1d2', 'c3c4', 'd4d5', 'c4c3', 'h2h3', 'e7e6'] });
+	const visible = () => page.evaluate(() => {
+		const box = document.querySelector('.moves').getBoundingClientRect(), r = document.querySelector('.moves .cur').getBoundingClientRect();
+		return r.left >= box.left - 1 && r.right <= box.right + 1;
+	});
+	assert.ok(await page.evaluate(() => { const m = document.querySelector('.moves'); return m.scrollWidth > m.clientWidth; }), '棋谱应长到需要横向滚动');
+	assert.ok(await visible(), '最新一步应在可见区');
+	await page.locator('.moves [data-ply="0"]').click();
+	await page.click('[data-act="review-prev"]');
+	assert.equal(await page.evaluate(() => document.querySelector('.moves').scrollLeft), 0, '看起始局面时棋谱应回到最左');
+});
+
 // 小屏手机终局：结算卡把棋谱挤出屏幕，也不能带动整页滚动（棋盘顶行会藏到标题栏下）。
 await scenario('小屏手机终局：页面不跳动、状态行看得到胜负', { width: 375, height: 667 }, async page => {
 	await fresh(page);
@@ -436,6 +456,13 @@ await scenario('升变待选时复盘、认输：选择框收起、棋盘不失�
 	await page.click('[data-act="review-exit"]');
 	await page.waitForTimeout(350);
 	assert.deepEqual(await pawnAt(), ['4', '1'], '回到当前局面，兵仍在 e7');
+	// 翻转棋盘：选择框按翻转前的格子排布，应收起
+	await promote();
+	await page.keyboard.press('f');
+	assert.ok(await page.locator('#board2d .b2d-promo').isHidden(), '翻转时升变选择应收起');
+	assert.deepEqual(await pawnAt(), ['3', '6'], '翻转后兵在 e7（翻转坐标）');
+	await page.keyboard.press('f');
+	await page.waitForTimeout(300);
 	await promote();
 	await page.click('[data-act="resign"]');
 	await page.click('[data-act="resign"]');
@@ -443,6 +470,25 @@ await scenario('升变待选时复盘、认输：选择框收起、棋盘不失�
 	await page.waitForTimeout(350);
 	assert.ok(await page.locator('#board2d .b2d-promo').isHidden(), '认输后升变选择应收起');
 	assert.deepEqual(await pawnAt(), ['4', '1'], '认输后兵画在 e7（那步升变没走成）');
+});
+
+// 悔棋动画还没落定就把兵拖到底线：选择框打开期间，动画收尾的对账不能把兵拉回原格。
+await scenario('动画收尾时升变待选：兵停在底线等选择', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await reloadWith(page, { fen: 'k7/4P3/8/8/8/8/8/K7 w - - 0 1', moves: ['a1b1', 'a8b7'], human: 8, level: 'novice' });
+	const [x1, y1] = await point(page, 'e7'), [x2, y2] = await point(page, 'e8');
+	await page.keyboard.press('u');                      // 两王滑回原位，约 230ms 后对账
+	await page.mouse.move(x1, y1);
+	await page.mouse.down();
+	await page.mouse.move(x2, y2, { steps: 3 });
+	await page.mouse.up();
+	await page.waitForSelector('#board2d .b2d-promo:not([hidden])');
+	await page.waitForTimeout(400);                      // 跨过对账时刻
+	const pawn = await page.$eval('#board2d .pc[data-p=wP]', el => el.style.getPropertyValue('--y'));
+	assert.equal(pawn, '0', '选择框打开时兵应停在 e8');
+	await page.click('#board2d .promo-choice[data-type="5"]');
+	await page.waitForTimeout(300);
+	assert.equal(await page.locator('#board2d .pc[data-p=wQ]').count(), 1, '选后升变为后');
 });
 
 // 复盘到起始局面：棋谱列表回到顶部，而不是跳到最新几步。
@@ -513,6 +559,27 @@ await scenario('多标签页：旧对局页不覆盖、终局页不清掉新对�
 	await c.keyboard.press('f');
 	await hide(c);
 	assert.equal((await slot())?.moves[0], 'd2d4', '已结束的标签页不应清掉 B 的对局');
+
+	// D 打开时恢复的正是 B 这盘（同一局）；B 接着下之后，D 切后台不能把旧着法写回去
+	const d = await ctx.newPage();
+	await d.goto(URL);
+	await d.waitForTimeout(200);
+	await click(b, 'b1');
+	await click(b, 'c3');
+	await waitMoves(b, 6);
+	await hide(d);
+	assert.equal((await slot()).moves.length, 6, '同一局的旧标签页切后台不应覆盖新着法');
+
+	// B 走一步后马上到 E 开新局：B 的电脑应着（不是人的操作）不能抢回存档位
+	const e = await ctx.newPage();
+	await e.goto(URL);
+	await click(b, 'a2');
+	await click(b, 'a3');
+	await e.click('[data-act="new"]');
+	await e.click('#dlg-new [data-act="start"]');
+	await waitMoves(b, 8);
+	await b.waitForTimeout(200);
+	assert.deepEqual((await slot()).moves, [], '存档位应是 E 刚开的新局');
 });
 
 // 系统开了"减少动态效果"：特效不显示，被吃棋子不淡出，结算卡不浮起。
@@ -543,6 +610,11 @@ await scenario('设置：棋盘主题与棋子套装', { width: 1280, height: 80
 	assert.deepEqual(await page.evaluate(() => [document.body.dataset.board, document.body.dataset.pieces]), ['mist', 'fantasy']);
 	// 定位开关本身（新旧版本都有这个元素）；桌面 Chrome 有 navigator.vibrate 但没有马达
 	assert.ok(await page.locator('#dlg-settings [data-setting=haptics]').isHidden(), '桌面电脑没有震动马达，不显示震动开关');
+	const [row, field] = await page.evaluate(() => {
+		const seg = document.querySelector('#dlg-settings [data-setting=sound]');
+		return [seg.parentElement.getBoundingClientRect().width, seg.closest('.field').getBoundingClientRect().width];
+	});
+	assert.ok(row > field * .9, `震动隐藏后「声音」应占满整行（${row}/${field}）`);
 	await page.reload();
 	assert.equal(await page.evaluate(() => document.body.dataset.board), 'mist', '设置应持久化');
 });

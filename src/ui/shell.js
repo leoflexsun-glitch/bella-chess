@@ -79,13 +79,18 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 			});
 			movesList.innerHTML = rows.map(r =>
 				`<li><span class="n">${r.no}.</span>${r.cells[0] || '<span class="n">…</span>'}${r.cells[1]}</li>`).join('');
-			// 只滚动棋谱列表本身。scrollIntoView 会连带滚动整页：
+			// 只滚动棋谱列表本身（桌面竖排、手机横排，两个方向都处理）。scrollIntoView 会连带滚动整页：
 			// 手机上终局时结算卡把棋谱挤到屏幕外，整页被拖下去，棋盘顶行藏到标题栏下。
 			const cur = movesList.querySelector('.cur');
 			if (cur) {
 				const box = movesList.getBoundingClientRect(), r = cur.getBoundingClientRect();
 				movesList.scrollTop += Math.min(0, r.top - box.top) + Math.max(0, r.bottom - box.bottom);
-			} else movesList.scrollTop = 0;   // 没有高亮项只可能是看起始局面（或还没走棋）：回到顶部
+				movesList.scrollLeft += Math.min(0, r.left - box.left) + Math.max(0, r.right - box.right);
+			} else {
+				// 没有高亮项只可能是看起始局面（或还没走棋）：回到开头
+				movesList.scrollTop = 0;
+				movesList.scrollLeft = 0;
+			}
 		},
 
 		setReview(text) {

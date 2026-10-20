@@ -42,7 +42,6 @@ export function createBoard2d(host, intents = {}) {
 	let pieces = new Map();       // sq -> 元素
 	let board = new Int8Array(128);
 	let marks = {};
-	let animating = 0;
 	let settleTimer = 0;
 	let drag = null;
 	let hoverSq = -1;
@@ -208,11 +207,10 @@ export function createBoard2d(host, intents = {}) {
 
 	function settle(after) {
 		clearTimeout(settleTimer);
-		animating++;
 		settleTimer = setTimeout(() => {
-			animating = 0;
 			// 动画只是视觉；落定后按真实局面对账一次，任何竞态都留不下残子。
-			reconcile();
+			// 升变选择打开时兵停在底线等选择，先不对账：选完走子或取消时会重新同步。
+			if (promoLayer.hidden) reconcile();
 			after?.();
 		}, ANIM_MS + 40);
 	}
@@ -337,7 +335,6 @@ export function createBoard2d(host, intents = {}) {
 			if (animate && pieces.size) { animateTo(next); return; }
 			board = Int8Array.from(next.board ?? next);
 			clearTimeout(settleTimer);
-			animating = 0;
 			render();
 		},
 		pulse,
@@ -395,7 +392,6 @@ export function createBoard2d(host, intents = {}) {
 
 		askPromotion,
 		cancelPromotion() { promoFinish?.(null); },
-		isIdle: () => animating === 0 && !drag,
 		get dragging() { return Boolean(drag); }
 	};
 }

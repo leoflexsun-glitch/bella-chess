@@ -157,7 +157,6 @@ export function createView3d({ canvas, settings, intents, askPromotion, onQualit
 		},
 
 		askPromotion: (to, color) => askPromotion(color),
-		isIdle: () => !w || (w.table.isIdle() && !pendingSync),
 
 		// 3D 专属
 		setQuality(q) { w?.stage.setQuality(q); },
