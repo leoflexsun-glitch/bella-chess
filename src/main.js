@@ -117,7 +117,8 @@ const match = createMatch({
 			else haptics.move();
 		}
 		if (mover !== match.state.human) clearSelection();
-		persist({ claim: mover === match.state.human });   // 电脑应着不是人的操作，不抢存档位
+		// 电脑应着不是人的操作，不抢存档位；终局的存档由 onEnd 处理。
+		if (!s.over) persist({ claim: mover === match.state.human });
 		refresh();
 	},
 	onThink: () => refresh(),
@@ -190,10 +191,11 @@ function refresh() {
 	else shell.setStatus(`轮到${SIDE[s.pos.turn]}`);
 
 	shell.setEval(s.eval, match.result());
-	shell.setMoves(s.history, reviewPly === null ? s.history.length - 1 : reviewPly);
 	shell.setReview(reviewPly === null ? null
 		: reviewPly < 0 ? `起始局面 · 共 ${s.history.length} 步` : `第 ${reviewPly + 1} / ${s.history.length} 步`);
 	shell.setResult(result);
+	// 棋谱放在最后：复盘条、结算卡出现会挤小棋谱区，滚动要按最终布局算。
+	shell.setMoves(s.history, reviewPly === null ? s.history.length - 1 : reviewPly);
 
 	shell.setControl('undo', { disabled: !playing || !s.history.some(h => h.mover === s.human) });
 	shell.setControl('resign', { disabled: !playing || Boolean(s.over) });
@@ -508,12 +510,20 @@ for (const key of ['board', 'pieces', 'coords']) body.dataset[key] = settings[ke
 // 不支持震动的设备（iPhone 的 Safari、桌面电脑）不显示震动开关，免得开了没反应。
 if (!haptics.supported) shell.hideSetting('haptics');
 
-// 切到后台或关页：对局进行中就先存档（含已用时长），再按可见性停表/续表。
+// 切到后台或关页：对局进行中就存一次档（含已用时长），再按可见性停表/续表。
+// 关页时 pagehide 与 visibilitychange 都会触发，只存一次。
+let leftSaved = false;
+const saveOnLeave = () => {
+	if (leftSaved) return;
+	leftSaved = true;
+	if (inProgress()) persist();
+};
 document.addEventListener('visibilitychange', () => {
-	if (document.hidden && inProgress()) persist();
+	if (document.hidden) saveOnLeave();
+	else leftSaved = false;
 	syncClock();
 });
-window.addEventListener('pagehide', () => { if (inProgress()) persist(); });
+window.addEventListener('pagehide', saveOnLeave);
 applyBoardTexture(settings.board);
 shell.paintSettings(settings);
 

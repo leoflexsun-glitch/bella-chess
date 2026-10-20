@@ -74,6 +74,20 @@ async function reloadWith(page, game) {
 }
 const fresh = async page => { await page.goto(URL); await reloadWith(page, null); };
 
+// 模拟标签页切到后台 / 回到前台。
+const hideTab = page => page.evaluate(() => {
+	Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+	document.dispatchEvent(new Event('visibilitychange'));
+});
+const showTab = page => page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); });
+
+// 一盘 40 个半步、未终局的对局（固定生成），测试长棋谱用。
+const LONG_GAME = [
+	'b2b4', 'd7d6', 'c1b2', 'h7h6', 'b2c3', 'a7a6', 'c3d4', 'b8c6', 'd4a7', 'h8h7', 'g1f3', 'c6b4', 'f3g1', 'd8d7', 'a2a3', 'd7h3',
+	'a7b8', 'h3e3', 'a3b4', 'e8d8', 'a1a5', 'e3c5', 'f2f3', 'c8f5', 'd2d4', 'c5c3', 'b1d2', 'c3c4', 'd4d5', 'c4c3', 'h2h3', 'e7e6',
+	'a5a2', 'e6d5', 'b8c7', 'd8c7', 'a2a3', 'd5d4', 'a3a6', 'f8e7'];
+const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
 await scenario('开局、走子、电脑应答、悔棋、翻转、刷新恢复', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
 	assert.ok(await page.isVisible('#dlg-new[open]'), '首次打开应弹出新对局');
@@ -309,13 +323,9 @@ await scenario('结算统计：用时不含关页时间、黑先局面回合数'
 	});
 	// 思考一会儿后切到后台：应立刻存下已用时长（之前只在走子时存，刷新会丢掉这段思考时间）
 	await page.waitForTimeout(1200);
-	const saved = await page.evaluate(() => {
-		Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
-		document.dispatchEvent(new Event('visibilitychange'));
-		delete document.hidden;
-		document.dispatchEvent(new Event('visibilitychange'));
-		return JSON.parse(localStorage.getItem('frostfall.game')).elapsed;
-	});
+	await hideTab(page);
+	await showTab(page);
+	const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')).elapsed);
 	assert.ok(saved >= 126000 && saved < 130000, `切后台时应存下已用时长，实际 ${saved}`);
 	await click(page, 'g1');
 	await click(page, 'g8');
@@ -345,9 +355,7 @@ await scenario('升变待选时悔棋失败：兵回到原格', { width: 1280, h
 // 手机上棋谱是横排的一条：最新一步要滚进可见区，看起始局面时回到最左。
 await scenario('手机横排棋谱：当前着法始终可见', { width: 375, height: 667 }, async page => {
 	await fresh(page);
-	await reloadWith(page, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', human: 8, level: 'novice', moves: [
-		'b2b4', 'd7d6', 'c1b2', 'h7h6', 'b2c3', 'a7a6', 'c3d4', 'b8c6', 'd4a7', 'h8h7', 'g1f3', 'c6b4', 'f3g1', 'd8d7', 'a2a3', 'd7h3',
-		'a7b8', 'h3e3', 'a3b4', 'e8d8', 'a1a5', 'e3c5', 'f2f3', 'c8f5', 'd2d4', 'c5c3', 'b1d2', 'c3c4', 'd4d5', 'c4c3', 'h2h3', 'e7e6'] });
+	await reloadWith(page, { fen: START, human: 8, level: 'novice', moves: LONG_GAME.slice(0, 32) });
 	const visible = () => page.evaluate(() => {
 		const box = document.querySelector('.moves').getBoundingClientRect(), r = document.querySelector('.moves .cur').getBoundingClientRect();
 		return r.left >= box.left - 1 && r.right <= box.right + 1;
@@ -496,12 +504,15 @@ await scenario('动画收尾时升变待选：兵停在底线等选择', { width
 // 复盘到起始局面：棋谱列表回到顶部，而不是跳到最新几步。
 await scenario('复盘到起始局面：棋谱列表回到顶部', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
-	await reloadWith(page, { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', human: 8, level: 'novice', moves: [
-		'b2b4', 'd7d6', 'c1b2', 'h7h6', 'b2c3', 'a7a6', 'c3d4', 'b8c6', 'd4a7', 'h8h7', 'g1f3', 'c6b4', 'f3g1', 'd8d7', 'a2a3', 'd7h3',
-		'a7b8', 'h3e3', 'a3b4', 'e8d8', 'a1a5', 'e3c5', 'f2f3', 'c8f5', 'd2d4', 'c5c3', 'b1d2', 'c3c4', 'd4d5', 'c4c3', 'h2h3', 'e7e6',
-		'a5a2', 'e6d5', 'b8c7', 'd8c7', 'a2a3', 'd5d4', 'a3a6', 'f8e7'] });
+	await reloadWith(page, { fen: START, human: 8, level: 'novice', moves: LONG_GAME });
 	const list = await page.evaluate(() => { const m = document.querySelector('.moves'); return [m.scrollHeight, m.clientHeight, m.scrollTop]; });
 	assert.ok(list[0] > list[1] && list[2] > 0, `棋谱应长到需要滚动，且停在最新处：${list}`);
+	// 进入复盘时复盘条出现、棋谱区变矮：高亮的那步仍要完整可见
+	await page.click('.moves [data-ply="38"]');
+	assert.ok(await page.evaluate(() => {
+		const box = document.querySelector('.moves').getBoundingClientRect(), r = document.querySelector('.moves .cur').getBoundingClientRect();
+		return r.top >= box.top - 1 && r.bottom <= box.bottom + 1;
+	}), '复盘条出现后，高亮的那步应完整可见');
 	await page.click('.moves [data-ply="0"]');           // 点第一步进入复盘，再退到起始局面
 	await page.click('[data-act="review-prev"]');
 	assert.match(await page.textContent('[data-slot=review]'), /起始局面/);
@@ -527,6 +538,19 @@ await scenario('没有声音也能下：发声时出错不影响走子', { width
 	assert.equal((await moves(page))[0], 'e4');
 });
 
+// 沙箱 iframe、禁用站点数据等环境：一碰 localStorage 就抛错。页面照样能打开、能下棋（只是不存档）。
+await scenario('存储不可用：页面照常可用', { width: 1280, height: 800 }, async page => {
+	await page.addInitScript(() => {
+		Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('denied', 'SecurityError'); } });
+	});
+	await page.goto(URL);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	assert.equal((await moves(page))[0], 'e4');
+});
+
 // 两个标签页：一个停在开局对话框，另一个在下棋。空闲的那个刷新界面时不能清掉别人的存档。
 await scenario('多标签页：空闲页面不清掉另一页的对局存档', { width: 1280, height: 800 }, async (page, ctx) => {
 	await fresh(page);                                   // 空闲页：停在新对局对话框
@@ -544,11 +568,6 @@ await scenario('多标签页：空闲页面不清掉另一页的对局存档', {
 
 // 空出的存档位由仍在进行的对局接上；在没"占着"存档位的标签页里认输，也要清掉这局的存档。
 await scenario('多标签页：空位由进行中的局接上，认输清掉本局存档', { width: 1280, height: 800 }, async (page, ctx) => {
-	const hide = p => p.evaluate(() => {
-		Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
-		document.dispatchEvent(new Event('visibilitychange'));
-	});
-	const show = p => p.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); });
 	const slot = () => page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game') || 'null'));
 	// A 在下 e4；C 随后开一盘一步杀并下完 → 存档位空出
 	await fresh(page);
@@ -563,14 +582,14 @@ await scenario('多标签页：空位由进行中的局接上，认输清掉本�
 	await click(c, 'h8');
 	await c.waitForSelector('[data-slot=result]:not([hidden])');
 	assert.equal(await slot(), null, 'C 那局结束，存档位空出');
-	await hide(page);                                    // A 切后台：把仍在进行的这局存进空位
+	await hideTab(page);                                    // A 切后台：把仍在进行的这局存进空位
 	assert.equal((await slot())?.moves[0], 'e2e4', '空出的存档位应由 A 的对局接上');
-	await show(page);
+	await showTab(page);
 	// B 打开时恢复的是 A 这局，B 切后台（存一下）；回到 A 认输：这局的存档要清掉
 	const b = await ctx.newPage();
 	await b.goto(URL);
 	await b.waitForTimeout(200);
-	await hide(b);
+	await hideTab(b);
 	await page.click('[data-act="resign"]');
 	await page.click('[data-act="resign"]');
 	await page.waitForSelector('[data-slot=result]:not([hidden])');
@@ -579,10 +598,6 @@ await scenario('多标签页：空位由进行中的局接上，认输清掉本�
 
 // 存档位只有一个：留给最近在下的那盘。旧标签页切后台/关页、或停在已结束的对局上，都不能覆盖或清掉它。
 await scenario('多标签页：旧对局页不覆盖、终局页不清掉新对局的存档', { width: 1280, height: 800 }, async (page, ctx) => {
-	const hide = p => p.evaluate(() => {
-		Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
-		document.dispatchEvent(new Event('visibilitychange'));
-	});
 	const slot = () => page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game') || 'null'));
 	// A：一盘没下完的旧棋（白已走 e4）
 	await fresh(page);
@@ -599,7 +614,7 @@ await scenario('多标签页：旧对局页不覆盖、终局页不清掉新对�
 	await click(b, 'd4');
 	await waitMoves(b, 2);
 	assert.equal((await slot()).moves[0], 'd2d4', '存档位应是 B 的新对局');
-	await hide(page);                                    // A 切到后台（随后关页同理）
+	await hideTab(page);                                    // A 切到后台（随后关页同理）
 	assert.equal((await slot()).moves[0], 'd2d4', '旧标签页切后台不应覆盖新对局');
 	// C：在一盘一步杀的对局里将杀结束，然后刷新界面、切后台
 	const c = await ctx.newPage();
@@ -613,7 +628,7 @@ await scenario('多标签页：旧对局页不覆盖、终局页不清掉新对�
 	await click(b, 'f3');
 	await waitMoves(b, 4);
 	await c.keyboard.press('f');
-	await hide(c);
+	await hideTab(c);
 	assert.equal((await slot())?.moves[0], 'd2d4', '已结束的标签页不应清掉 B 的对局');
 
 	// D 打开时恢复的正是 B 这盘（同一局）；B 接着下之后，D 切后台不能把旧着法写回去
@@ -623,7 +638,7 @@ await scenario('多标签页：旧对局页不覆盖、终局页不清掉新对�
 	await click(b, 'b1');
 	await click(b, 'c3');
 	await waitMoves(b, 6);
-	await hide(d);
+	await hideTab(d);
 	assert.equal((await slot()).moves.length, 6, '同一局的旧标签页切后台不应覆盖新着法');
 
 	// B 走一步后马上到 E 开新局：B 的电脑应着（不是人的操作）不能抢回存档位
@@ -655,6 +670,16 @@ await scenario('减少动态效果：特效与过渡全部关闭', { width: 1280
 		};
 	});
 	assert.deepEqual(style, { fx: 'none', gone: '0s', card: 'none' });
+	// 正常模式下：淡出的棋子保留位移过渡（滑到一半被淡出时不先跳到终点）
+	await page.emulateMedia({ reducedMotion: 'no-preference' });
+	const gone = await page.evaluate(() => {
+		const el = Object.assign(document.createElement('i'), { className: 'pc wP gone' });
+		document.querySelector('#board2d .b2d-pieces').append(el);
+		const t = getComputedStyle(el).transitionProperty;
+		el.remove();
+		return t;
+	});
+	assert.match(gone, /transform/);
 });
 
 await scenario('设置：棋盘主题与棋子套装', { width: 1280, height: 800 }, async page => {
@@ -705,6 +730,7 @@ await scenario('音效：不削波、第一声不偏小', { width: 800, height: 
 		const { createAudio } = await import('/src/core/audio.js');
 		const offline = () => {
 			const off = new OfflineAudioContext(1, 44100 * 3, 44100);
+			Object.defineProperty(off, 'state', { get: () => 'running' });   // 离线渲染没有"挂起待解锁"这回事
 			off.go = off.resume.bind(off);
 			off.resume = () => Promise.resolve();          // 由这里在排好声音后再继续渲染
 			window.AudioContext = function () { return off; };

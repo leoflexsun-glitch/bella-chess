@@ -103,7 +103,8 @@
 }
 .b2d .pc.snap { transition: none; }
 /* 被吃的棋子只淡出，不缩放不变形；新出现的（悔棋复原）只淡入。 */
-.b2d .pc.gone { opacity: 0; transition: opacity 150ms ease; }
+/* 淡出时保留位移过渡：滑到一半被判定为多余的棋子，原地淡出而不是先跳到终点。 */
+.b2d .pc.gone { opacity: 0; transition: opacity 150ms ease, transform 190ms cubic-bezier(.25, .8, .35, 1); }
 .b2d .pc.appear { animation: pc-in 180ms ease-out; }
 @keyframes pc-in { from { opacity: 0; } }
 
