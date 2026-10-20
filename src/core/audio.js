@@ -26,13 +26,18 @@ export function createAudio() {
 	// 不用 DynamicsCompressor：Chromium 里它刚创建时处在最大压缩状态，开局第一声会小约 10 dB。
 	function build() {
 		const ac = new (window.AudioContext || window.webkitAudioContext)();
-		const clip = ac.createWaveShaper();
-		clip.curve = softClipCurve();
-		clip.oversample = '2x';
-		out = ac.createGain();
-		out.gain.value = 0.7 / CLIP_RANGE;
-		out.connect(clip).connect(ac.destination);
-		return ac;
+		try {
+			const clip = ac.createWaveShaper();
+			clip.curve = softClipCurve();
+			clip.oversample = '2x';
+			out = ac.createGain();
+			out.gain.value = 0.7 / CLIP_RANGE;
+			out.connect(clip).connect(ac.destination);
+			return ac;
+		} catch (error) {
+			ac.close?.()?.catch?.(() => {});   // 建到一半失败：关掉已建的上下文，别泄漏（浏览器对个数有上限）
+			throw error;
+		}
 	}
 
 	const ready = () => {

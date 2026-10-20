@@ -21,6 +21,22 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 	const toastBox = $('toast');
 	const movesList = $('moves');
 	let movesKey = null;
+
+	// 把当前步滚进棋谱区可见范围。只滚动棋谱列表本身（桌面竖排、手机横排，两个方向都处理）：
+	// scrollIntoView 会连带滚动整页，手机上终局时会把棋盘顶行拖到标题栏下。
+	function scrollToCurrent() {
+		const cur = movesList.querySelector('.cur');
+		if (!cur) {
+			// 没有高亮项只可能是看起始局面（或还没走棋）：回到开头
+			movesList.scrollTop = 0;
+			movesList.scrollLeft = 0;
+			return;
+		}
+		const box = movesList.getBoundingClientRect(), r = cur.getBoundingClientRect();
+		movesList.scrollTop += Math.min(0, r.top - box.top) + Math.max(0, r.bottom - box.bottom);
+		movesList.scrollLeft += Math.min(0, r.left - box.left) + Math.max(0, r.right - box.right);
+	}
+	if (typeof ResizeObserver === 'function') new ResizeObserver(scrollToCurrent).observe(movesList);
 	let toastTimer = 0;
 
 	// 所有 data-act 按钮（顶栏、侧栏、弹窗里）统一派发。
@@ -70,7 +86,7 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 		setMoves(history, current) {
 			// refresh 很频繁（每次点选都有）：内容没变就不重建列表、不重算滚动——实测这能省下点选耗时的一半以上。
 			// 列表内容完全由"当前步 + 首步的回合号与执子方 + 各步着法"决定（之后的编号、执子方依次交替）。
-			// 调用方须在复盘条、结算卡更新之后再调用，滚动才按最终布局算。
+			// 内容没变但棋谱区大小变了（复盘条、结算卡出现，窗口缩放）由上面的 ResizeObserver 重新滚动。
 			const key = `${current}|${history[0]?.no}|${history[0]?.mover}|${history.map(h => h.san).join(' ')}`;
 			if (key === movesKey) return;
 			movesKey = key;
@@ -86,18 +102,7 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 			});
 			movesList.innerHTML = rows.map(r =>
 				`<li><span class="n">${r.no}.</span>${r.cells[0] || '<span class="n">…</span>'}${r.cells[1]}</li>`).join('');
-			// 只滚动棋谱列表本身（桌面竖排、手机横排，两个方向都处理）。scrollIntoView 会连带滚动整页：
-			// 手机上终局时结算卡把棋谱挤到屏幕外，整页被拖下去，棋盘顶行藏到标题栏下。
-			const cur = movesList.querySelector('.cur');
-			if (cur) {
-				const box = movesList.getBoundingClientRect(), r = cur.getBoundingClientRect();
-				movesList.scrollTop += Math.min(0, r.top - box.top) + Math.max(0, r.bottom - box.bottom);
-				movesList.scrollLeft += Math.min(0, r.left - box.left) + Math.max(0, r.right - box.right);
-			} else {
-				// 没有高亮项只可能是看起始局面（或还没走棋）：回到开头
-				movesList.scrollTop = 0;
-				movesList.scrollLeft = 0;
-			}
+			scrollToCurrent();
 		},
 
 		setReview(text) {

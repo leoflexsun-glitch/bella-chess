@@ -1,6 +1,6 @@
 import {
 	WHITE, BLACK, QUEEN, START_FEN,
-	fromFen, toFen, generateMoves, makeMove, sanOf, status, findMove, inCheck,
+	fromFen, toFen, generateMoves, makeMove, sanOf, status, findMove,
 	parseSquare, squareName, other
 } from '../chess/engine.js';
 import { normalize } from '../chess/setup.js';
@@ -177,7 +177,6 @@ export function createMatch(hooks = {}) {
 
 		hooks.onMove?.(move, { san, mover, captured, material: tally() });
 		if (over) { hooks.onEnd?.(over); return; }
-		hooks.onTurn?.(state.pos.turn, inCheck(state.pos));
 		if (state.pos.turn !== state.human) think();
 	}
 
@@ -195,7 +194,6 @@ export function createMatch(hooks = {}) {
 	function announce(reason) {
 		hooks.onReset?.(reason);
 		if (state.over) { hooks.onEnd?.(state.over); return; }
-		hooks.onTurn?.(state.pos.turn, inCheck(state.pos));
 		if (state.pos.turn !== state.human) think();
 	}
 

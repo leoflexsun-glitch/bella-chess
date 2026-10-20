@@ -7,12 +7,15 @@ export function jsonStore(storage) {
 		get(key) {
 			try { return JSON.parse(target().getItem(key) || 'null'); } catch { return null; }
 		},
-		// value 为 null 表示删除
+		// value 为 null 表示删除；返回是否成功（存满、被禁用时为 false）
 		set(key, value) {
 			try {
 				if (value === null) target().removeItem(key);
 				else target().setItem(key, JSON.stringify(value));
-			} catch { /* 存不了就只在本次会话生效 */ }
+				return true;
+			} catch {
+				return false;   // 存不了就只在本次会话生效
+			}
 		}
 	};
 }

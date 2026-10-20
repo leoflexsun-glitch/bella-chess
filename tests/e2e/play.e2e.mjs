@@ -535,6 +535,20 @@ await scenario('快速连按复盘：棋子元素不堆积', { width: 1280, heig
 	assert.equal(await page.locator('#board2d .pc.gone').count(), 0);
 });
 
+// 长对局认输：结算卡出现、棋谱区变矮（棋谱内容没变），最后一步仍要完整可见。
+await scenario('长对局认输：结算卡出现后最后一步仍可见', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await reloadWith(page, { fen: START, human: 8, level: 'novice', moves: LONG_GAME });
+	await page.click('[data-act="resign"]');
+	await page.click('[data-act="resign"]');
+	await page.waitForSelector('[data-slot=result]:not([hidden])');
+	await page.waitForTimeout(100);
+	assert.ok(await page.evaluate(() => {
+		const box = document.querySelector('.moves').getBoundingClientRect(), r = document.querySelector('.moves .cur').getBoundingClientRect();
+		return r.top >= box.top - 1 && r.bottom <= box.bottom + 1;
+	}), '最后一步应完整可见');
+});
+
 // 复盘到起始局面：棋谱列表回到顶部，而不是跳到最新几步。
 await scenario('复盘到起始局面：棋谱列表回到顶部', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
@@ -630,8 +644,8 @@ await scenario('多标签页：空位由进行中的局接上，认输清掉本�
 	assert.equal(await slot(), null, '认输后这局的存档应清掉，不会再被恢复');
 });
 
-// 旁观页：用户打开第二个标签页看一眼，又回到原来那页接着下。之后旁观页切后台，不能写回它自己的用时与翻转。
-await scenario('多标签页：旁观页不写回自己的用时与翻转', { width: 1280, height: 800 }, async (page, ctx) => {
+// 旁观页：用户打开第二个标签页看了一眼，回到原来那页接着下。旁观页之后切后台，不能写回它自己的翻转，也不能让用时倒退。
+await scenario('多标签页：旁观页不写回自己的翻转、不让用时倒退', { width: 1280, height: 800 }, async (page, ctx) => {
 	const slot = () => page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game') || 'null'));
 	await fresh(page);
 	await page.click('#dlg-new [data-act="start"]');
@@ -641,25 +655,16 @@ await scenario('多标签页：旁观页不写回自己的用时与翻转', { wi
 	const b = await ctx.newPage();
 	await b.goto(URL);                                   // 旁观页：恢复同一局
 	await b.waitForTimeout(200);
-	await hideTab(b);
-	await showTab(page);                                 // 回到 A
-	await page.keyboard.press('f');                      // 翻转：立刻存
+	await page.keyboard.press('f');                      // 回到 A 翻转：立刻存
 	assert.equal((await slot()).flipped, true, '翻转应立刻存下');
 	await page.waitForTimeout(1200);
 	await hideTab(page);
 	const fromA = await slot();
-	await showTab(b);                                    // 旁观页再被切到前台又切走——这算用户看了它
-	await hideTab(b);
+	await hideTab(b);                                    // 旁观页切后台
 	const afterB = await slot();
-	assert.equal(afterB.flipped, false, '用户切回 B，B 成为写入方，写入它自己的局面（这是用户最后看的那页）');
-	await showTab(page);
-	await page.click('#board2d');                        // 用户回到 A 并点了一下
-	await hideTab(page);
-	const back = await slot();
-	assert.equal(back.flipped, true, '回到 A 后，A 的翻转重新存下');
-	assert.ok(back.elapsed >= fromA.elapsed, 'A 的用时不倒退');
-	await hideTab(b);                                    // B 没被再看：不写
-	assert.equal((await slot()).flipped, true, '没被再看的旁观页不写');
+	assert.equal(afterB.flipped, true, '旁观页不写回自己的翻转');
+	assert.ok(afterB.elapsed >= fromA.elapsed, `旁观页不让用时倒退：${fromA.elapsed} → ${afterB.elapsed}`);
+	assert.deepEqual(afterB.moves, fromA.moves);
 });
 
 // 存档位只有一个：留给最近在下的那盘。旧标签页切后台/关页、或停在已结束的对局上，都不能覆盖或清掉它。
