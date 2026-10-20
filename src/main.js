@@ -337,7 +337,11 @@ function pressSquare(sq) {
 	}
 	const piece = match.state.pos.board[sq];
 	if (piece && colorOf(piece) === match.state.human) {
-		if (sq === selected) { pendingDeselect = true; return legal.length > 0; }
+		if (sq === selected) {
+			if (!legal.length) { clearSelection(); refresh(); return false; }   // 没有着法就不会起拖拽，抬起时取消不了：这里直接取消
+			pendingDeselect = true;
+			return true;
+		}
 		select(sq);
 		return legal.length > 0;
 	}

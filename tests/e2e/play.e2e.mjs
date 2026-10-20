@@ -1060,6 +1060,34 @@ await scenario('主链路：逼和显示和棋', { width: 1280, height: 800 }, a
 	assert.match(await page.textContent('[data-slot=result]'), /和/);
 });
 
+await scenario('主链路：窄手机横放，棋盘仍然够大', { width: 640, height: 360 }, async page => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	const box = await page.locator('#board2d .b2d').boundingBox();
+	assert.ok(box.width >= 200, `棋盘只有 ${Math.round(box.width)}px`);
+	assert.ok(box.y + box.height <= 360, '棋盘应在屏幕内');
+});
+
+await scenario('主链路：摆棋时粘贴不带易位权的 FEN，开局后不能易位', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="setup"]');
+	await page.click('#editor [data-ed="clear"]');
+	await page.fill('#ed-fen', 'r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w - - 0 1');
+	await page.locator('#ed-fen').blur();
+	assert.equal(await page.inputValue('#ed-fen'), 'r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w - - 0 1');
+	assert.equal(await page.locator('#editor [data-slot="castling"] input:checked').count(), 0);
+});
+
+await scenario('主链路：再点一次没有着法的已选棋子，取消选择', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'a1');
+	await page.waitForSelector('.mk.sel');
+	await click(page, 'a1');
+	await page.waitForTimeout(150);
+	assert.equal(await page.locator('.mk.sel').count(), 0);
+});
+
 await browser.close();
 server.close();
 if (errors.length) { console.log('页面错误：\n  ' + errors.join('\n  ')); process.exitCode = 1; }

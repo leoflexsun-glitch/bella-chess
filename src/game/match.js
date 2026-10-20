@@ -1,5 +1,5 @@
 import {
-	WHITE, BLACK, QUEEN, START_FEN,
+	WHITE, BLACK, QUEEN, START_FEN, EP,
 	fromFen, toFen, generateMoves, makeMove, sanOf, status, findMove,
 	parseSquare, squareName, other
 } from '../chess/engine.js';
@@ -20,7 +20,12 @@ const PACE = {
 const PROMO_LETTER = { 2: 'n', 3: 'b', 4: 'r', 5: 'q' };
 const LETTER_PROMO = { n: 2, b: 3, r: 4, q: 5 };
 
-const positionKey = pos => toFen(pos).split(' ').slice(0, 4).join(' ');
+// 判重复局面用：按规则，过路兵格只在真能吃过路兵时才让局面不同（刚走完两格的兵、旁边没有对方兵时不算）。
+const positionKey = pos => {
+	const [placement, turn, castling] = toFen(pos).split(' ');
+	const ep = generateMoves(pos).some(m => m.flags & EP) ? squareName(pos.ep) : '-';
+	return `${placement} ${turn} ${castling} ${ep}`;
+};
 export const uciOf = move => squareName(move.from) + squareName(move.to) + (move.promotion ? PROMO_LETTER[move.promotion] : '');
 
 // 搜索引擎：优先放进 worker（主线程不卡）。托管环境若禁止 worker（CSP、沙箱 iframe），
@@ -81,8 +86,8 @@ export function createMatch(hooks = {}) {
 		if (hint && data.id === hint.id) {
 			const { fen, done } = hint;
 			hint = null;
-			// 局面已经变了（走子/悔棋），提示作废。
-			if (fen !== toFen(state.pos) || !data.from) { done(null); return; }
+			// 局面已经变了（走子/悔棋）或已终局，提示作废。
+			if (state.over || fen !== toFen(state.pos) || !data.from) { done(null); return; }
 			done(findMove(state.pos, parseSquare(data.from), parseSquare(data.to), data.promotion || QUEEN));
 			return;
 		}
@@ -252,6 +257,7 @@ export function createMatch(hooks = {}) {
 			if (target === state.history.length) return false;
 
 			cancelThinking();
+			hint = null;               // 进行中的提示作废，悔棋后可以马上再要
 			const entry = state.history[target];
 			state.history = state.history.slice(0, target);
 			state.pos = fromFen(entry.before);
@@ -270,6 +276,7 @@ export function createMatch(hooks = {}) {
 		resign() {
 			if (state.over || !state.started) return;
 			cancelThinking();
+			hint = null;
 			state.over = { reason: 'resignation', winner: other(state.human) };
 			hooks.onEnd?.(state.over);
 		},

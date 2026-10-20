@@ -128,13 +128,14 @@ export function createEditor({ settings, onPlay, onPhoto, toast }) {
 
 	const currentFen = () => toFen({ board, turn, castling, ep: -1, half: 0, full: 1 });
 
-	function changed() {
-		// 易位权跟随摆法：不可能的去掉并禁用；重新变得可能时默认勾上。
+	// fromFen：局面来自 FEN，易位权以 FEN 为准，不按"重新变得可能就默认勾上"补回。
+	function changed({ fromFen = false } = {}) {
+		// 易位权跟随摆法：不可能的去掉并禁用；摆子使它重新变得可能时默认勾上。
 		const possible = possibleCastling({ board });
 		for (const [flag, bit] of Object.entries(FLAGS)) {
 			const box = root.querySelector(`[data-slot="castling"] input[value="${flag}"]`);
 			if (!possible[flag]) castling &= ~bit;
-			else if (box.disabled) castling |= bit;
+			else if (box.disabled && !fromFen) castling |= bit;
 			box.disabled = !possible[flag];
 			box.checked = Boolean(castling & bit);
 			box.parentElement.classList.toggle('off', !possible[flag]);
@@ -163,7 +164,7 @@ export function createEditor({ settings, onPlay, onPhoto, toast }) {
 		castling = pos.castling;
 		if (!sideTouched) side = turn;
 		if (!keepWarn) warn = new Set();
-		changed();
+		changed({ fromFen: true });
 	}
 
 	root.addEventListener('click', event => {

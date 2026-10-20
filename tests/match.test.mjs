@@ -161,3 +161,34 @@ test('恢复存档时遇到格子写错的着法就停下，不会配出别的�
 	m.restore({ human: WHITE, level: 'club', fen: '4k3/8/8/8/8/8/4P3/4K3 w - - 0 1', moves: ['x2e4', 'e2e4'] });
 	assert.equal(m.state.history.length, 0);
 });
+
+// 电脑应着：把最近一次搜索请求的结果送回。
+const reply = (from, to) => globalThis.__lastWorker.onmessage({ data: { type: 'result', id: posted.filter(p => p.id > 0).at(-1).id, from, to } });
+
+test('提示进行中悔棋：提示作废，马上可以再要', async () => {
+	const m = createMatch();
+	m.newGame({ human: WHITE, level: 'novice' });
+	m.play(parseSquare('e2'), parseSquare('e4'));
+	reply('e7', 'e5');
+	for (let i = 0; i < 60 && m.state.thinking; i++) await new Promise(r => setTimeout(r, 50));   // 电脑落子有节奏延时
+	assert.ok(m.suggest(() => {}));
+	assert.ok(m.undo());
+	assert.ok(m.suggest(() => {}), '悔棋后再要提示应被受理');
+});
+
+test('提示进行中认输：结果迟到也不再给出', () => {
+	const m = createMatch();
+	m.newGame({ human: WHITE, level: 'novice' });
+	let result = 'pending';
+	assert.ok(m.suggest(move => { result = move; }));
+	const hintMsg = posted.at(-1);
+	m.resign();
+	globalThis.__lastWorker.onmessage({ data: { type: 'result', id: hintMsg.id, from: 'e2', to: 'e4' } });
+	assert.ok(result === 'pending' || result === null, '不应给出提示着法');
+});
+
+test('三次重复：刚走完两格兵、没法吃过路兵的局面也算同一局面', () => {
+	const m = createMatch();
+	m.restore({ human: WHITE, level: 'novice', fen: undefined, moves: ['e2e4', 'g8f6', 'g1f3', 'f6g8', 'f3g1', 'g8f6', 'g1f3', 'f6g8', 'f3g1'] });
+	assert.equal(m.state.over?.reason, 'threefold repetition');
+});

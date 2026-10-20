@@ -347,7 +347,7 @@ body[data-view="3d"] .moves li:nth-child(odd) { background: rgba(255, 255, 255, 
 
 /* ── 竖屏（手机、平板竖放）：棋盘铺满宽度，侧栏落到棋盘下方，操作条吸底 ── */
 
-@media (max-aspect-ratio: 6/5), (max-width: 640px) {
+@media (max-aspect-ratio: 6/5) {
 	:root { --topbar: 50px; }
 	.topbar { padding: 0 10px; }
 	.brand b { font-size: 16px; }
