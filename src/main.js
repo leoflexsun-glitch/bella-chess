@@ -11,6 +11,7 @@ import { createShell } from './ui/shell.js';
 import { loadSettings, saveSettings, saveGame, loadGame } from './ui/settings.js';
 import { createAudio } from './core/audio.js';
 import { createHaptics } from './core/haptics.js';
+import { createClock } from './core/clock.js';
 import { createEditor } from './editor/editor.js';
 import { createPhoto } from './editor/photo.js';
 import * as vision from './vision/index.js';
@@ -44,16 +45,7 @@ let reviewPly = null;      // 正在查看的历史半步；null = 当前局面
 let flipped = false;
 let resignArmed = 0;
 let hintArrow = null;      // 电脑给出的提示着法 { from, to }，走子或悔棋后清除
-
-// 对局用时：只计开着页面下棋的时间；关页期间、结算画面都停表。
-const clock = {
-	spent: 0,
-	since: 0,                  // 本段开始计时的时刻；0 = 停表
-	start(spent = 0) { this.spent = spent; this.since = Date.now(); },
-	resume() { this.since ||= Date.now(); },
-	stop() { this.spent = this.read(); this.since = 0; },
-	read() { return this.spent + (this.since ? Date.now() - this.since : 0); }
-};
+const clock = createClock();  // 本局用时：页面隐藏、关页、终局时停表
 
 const shell = createShell({ onAction: handleAction, onSetting: changeSetting, onMoveClick: reviewTo });
 
@@ -180,12 +172,12 @@ function refresh() {
 	// 状态行
 	if (!playing) shell.setStatus('选择对局方式开始');
 	else if (reviewPly !== null) shell.setStatus('正在复盘');
-	else if (s.over) shell.setStatus('对局结束');            // 胜负写在下面的结算卡里，这里不重复
+	else if (s.over) shell.setStatus(resultText(s.over).title);   // 小屏手机上结算卡可能在屏幕外，胜负要在这里看得到
 	else if (s.thinking) shell.setStatus('电脑思考中…');
 	else if (s.pos.turn === s.human) shell.setStatus(checked >= 0 ? '将军！轮到你走' : '轮到你走', { check: checked >= 0 });
 	else shell.setStatus(`轮到${SIDE[s.pos.turn]}`);
 
-	shell.setEval(s.eval, s.over ? match.result() : null);
+	shell.setEval(s.eval, match.result());
 	shell.setMoves(s.history, reviewPly === null ? s.history.length - 1 : reviewPly);
 	shell.setReview(reviewPly === null ? null
 		: reviewPly < 0 ? `起始局面 · 共 ${s.history.length} 步` : `第 ${reviewPly + 1} / ${s.history.length} 步`);
@@ -325,10 +317,11 @@ function dropPromotion() {
 function takeBack() {
 	if (!playing) return;
 	dropPromotion();
-	const wasReviewing = reviewPly !== null;
 	reviewPly = null;
 	if (match.undo(1)) { shell.toast('已悔棋', 1200); return; }
-	if (wasReviewing) { view.setPosition(match.state.pos, { animate: true }); refresh(); }
+	// 没有可悔的棋：仍把棋盘拉回当前局面（可能停在复盘位置，或升变待选时兵已画在底线）。
+	view.setPosition(match.state.pos, { animate: true });
+	refresh();
 	audio.deny();
 	shell.toast('没有可以悔的棋');
 }
@@ -475,8 +468,17 @@ const photo = createPhoto({
 // ── 启动 ─────────────────────────────────────────────────────────
 
 for (const key of ['board', 'pieces', 'coords']) body.dataset[key] = settings[key];
-// 不支持震动的设备（如 iPhone 的 Safari）不显示震动开关，免得开了没反应。
-document.querySelector('[data-setting="haptics"]').parentElement.hidden = !haptics.supported;
+// 不支持震动的设备（iPhone 的 Safari、桌面电脑）不显示震动开关，免得开了没反应。
+if (!haptics.supported) shell.hideSetting('haptics');
+
+// 切到后台或关页：对局进行中就先存档（含已用时长）再停表；切回来接着计时。
+// 没在下棋时不写存档：否则关掉一个空页面会把另一个标签页里正在下的那盘清掉。
+const inProgress = () => playing && !match.state.over;
+document.addEventListener('visibilitychange', () => {
+	if (document.hidden) { if (inProgress()) persist(); clock.stop(); }
+	else if (inProgress()) clock.resume();
+});
+window.addEventListener('pagehide', () => { if (inProgress()) persist(); });
 applyBoardTexture(settings.board);
 shell.paintSettings(settings);
 
@@ -484,7 +486,8 @@ const saved = loadGame();
 if (saved) {
 	playing = true;
 	flipped = Boolean(saved.flipped);
-	clock.start(Number(saved.elapsed) || 0);
+	clock.start(saved.elapsed);
+	if (document.hidden) clock.stop();      // 在后台标签页里打开的，等切回来再计时
 	view.setFlipped(flipped);
 	match.restore(saved);
 	if (match.state.history.length) shell.toast('已恢复上一局', 1800);

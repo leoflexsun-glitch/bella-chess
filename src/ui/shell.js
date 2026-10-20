@@ -5,6 +5,16 @@ import { WHITE } from '../chess/engine.js';
 
 const LETTER = { 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
 const $ = (name, root = document) => root.querySelector(`[data-slot="${name}"]`);
+// 评估条：白方占比（%）与文字。终局按比分画满一侧或居中。
+const FINAL = { '1-0': [96, '终局 1-0'], '0-1': [4, '终局 0-1'], '1/2-1/2': [50, '终局 ½-½'] };
+function evalBar(pawns) {
+	const mate = Math.abs(pawns) > 900;
+	const clamped = Math.max(-8, Math.min(8, pawns));
+	const text = mate ? `${pawns > 0 ? '白' : '黑'}方将杀在望`
+		: Math.abs(clamped) < 0.35 ? '均势'
+			: `${clamped > 0 ? '白' : '黑'} +${Math.abs(pawns).toFixed(1)}`;
+	return [50 + (clamped / 8) * 46, text];
+}
 const escapeHtml = text => String(text).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export function createShell({ onAction, onSetting, onMoveClick }) {
@@ -48,16 +58,11 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 		},
 
 		// pawns：白方视角的兵值分；超过 900 是搜索给出的将杀分。
-		// final：终局比分（PGN 记法 '1-0' / '0-1' / '1/2-1/2'），给出时不再显示引擎分。
-		setEval(pawns, final = null) {
-			if (final) pawns = final === '1-0' ? 8 : final === '0-1' ? -8 : 0;
-			const mate = Math.abs(pawns) > 900;
-			const clamped = Math.max(-8, Math.min(8, pawns));
-			$('eval-fill').style.width = `${50 + (clamped / 8) * 46}%`;
-			$('eval-text').textContent = final ? `终局 ${final === '1/2-1/2' ? '½-½' : final}`
-				: mate ? `${pawns > 0 ? '白' : '黑'}方将杀在望`
-				: Math.abs(clamped) < 0.35 ? '均势'
-					: `${clamped > 0 ? '白' : '黑'} +${Math.abs(pawns).toFixed(1)}`;
+		// result：比分（PGN 记法）；终局时评估条直接显示比分，不再显示引擎分。
+		setEval(pawns, result = '*') {
+			const [width, text] = FINAL[result] ?? evalBar(pawns);
+			$('eval-fill').style.width = `${width}%`;
+			$('eval-text').textContent = text;
 		},
 
 		// history：对局记录；current：高亮的半步序号（-1 表示起始局面）。
@@ -74,9 +79,13 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 			});
 			movesList.innerHTML = rows.map(r =>
 				`<li><span class="n">${r.no}.</span>${r.cells[0] || '<span class="n">…</span>'}${r.cells[1]}</li>`).join('');
+			// 只滚动棋谱列表本身。scrollIntoView 会连带滚动整页：
+			// 手机上终局时结算卡把棋谱挤到屏幕外，整页被拖下去，棋盘顶行藏到标题栏下。
 			const cur = movesList.querySelector('.cur');
-			if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-			else movesList.scrollTop = movesList.scrollHeight;
+			if (cur) {
+				const box = movesList.getBoundingClientRect(), r = cur.getBoundingClientRect();
+				movesList.scrollTop += Math.min(0, r.top - box.top) + Math.max(0, r.bottom - box.bottom);
+			} else movesList.scrollTop = movesList.scrollHeight;
 		},
 
 		setReview(text) {
@@ -107,6 +116,12 @@ export function createShell({ onAction, onSetting, onMoveClick }) {
 		},
 
 		// 把设置值画到所有分段控件上（新对局、设置、摆棋里可能同时存在同一项）。
+		// 设备不支持的设置项整行隐藏（如没有震动马达）。
+		hideSetting(key) {
+			const row = document.querySelector(`[data-row="${key}"]`);
+			if (row) row.hidden = true;
+		},
+
 		paintSettings(settings) {
 			for (const seg of document.querySelectorAll('[data-setting]')) {
 				const value = settings[seg.dataset.setting];

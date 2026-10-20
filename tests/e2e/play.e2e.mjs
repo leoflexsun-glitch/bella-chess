@@ -15,7 +15,9 @@ const { chromium } = await import(process.env.PLAYWRIGHT_PATH || 'playwright');
 // 发布形态就是单个 index.html；另外放出 src/core 下的模块，供音频这类单元级场景直接导入。
 const server = createServer(async (req, res) => {
 	if (/^\/src\/core\/[\w-]+\.js$/.test(req.url)) {
-		res.writeHead(200, { 'content-type': 'text/javascript' }).end(await readFile(path.join(root, req.url)));
+		const body = await readFile(path.join(root, req.url)).catch(() => null);
+		if (body) res.writeHead(200, { 'content-type': 'text/javascript' }).end(body);
+		else res.writeHead(404).end();
 		return;
 	}
 	if (req.url !== '/' && !req.url.startsWith('/index.html')) { res.writeHead(404).end(); return; }
@@ -56,7 +58,18 @@ async function point(page, square, selector = '#board2d .b2d') {
 const click = async (page, sq, sel) => page.mouse.click(...await point(page, sq, sel));
 const moves = page => page.$$eval('.moves [data-ply]', els => els.map(e => e.textContent));
 const waitMoves = (page, n) => page.waitForFunction(k => document.querySelectorAll('.moves [data-ply]').length >= k, n, { timeout: 20000 });
-const fresh = async page => { await page.goto(URL); await page.evaluate(() => localStorage.clear()); await page.reload(); };
+// 改存档后刷新。应用在切后台/关页时（pagehide，随后 visibilitychange）会存下进行中的对局，
+// 所以在这两个事件里排在应用之后再写一次，否则刷新时旧对局会覆盖刚写入的存档。game 为 null 表示清空全部存储。
+async function reloadWith(page, game) {
+	await page.evaluate(g => {
+		const write = () => g ? localStorage.setItem('frostfall.game', JSON.stringify(g)) : localStorage.clear();
+		write();
+		addEventListener('pagehide', write);
+		document.addEventListener('visibilitychange', write);
+	}, game);
+	await page.reload();
+}
+const fresh = async page => { await page.goto(URL); await reloadWith(page, null); };
 
 await scenario('开局、走子、电脑应答、悔棋、翻转、刷新恢复', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
@@ -84,8 +97,7 @@ await scenario('开局、走子、电脑应答、悔棋、翻转、刷新恢复'
 
 await scenario('拖拽走子与升变选择', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
-	await page.evaluate(() => localStorage.setItem('frostfall.game', JSON.stringify({ fen: '8/P6k/7p/8/8/8/8/K7 w - - 0 1', moves: [], human: 8, level: 'novice' })));
-	await page.reload();
+	await reloadWith(page, { fen: '8/P6k/7p/8/8/8/8/K7 w - - 0 1', moves: [], human: 8, level: 'novice' });
 	const [x1, y1] = await point(page, 'a7'), [x2, y2] = await point(page, 'a8');
 	await page.mouse.move(x1, y1);
 	await page.mouse.down();
@@ -139,11 +151,8 @@ await scenario('对局进行中从摆棋/识别结果开局：一定是全新一
 await scenario('拍照复刻：截图导入 → 自动定位 → 识别 → 核对 → 开全新一局', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
 	const fen = 'r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP3PPP/R2QKB1R w KQ - 0 8';
-	await page.evaluate(f => {
-		localStorage.setItem('frostfall.v2', JSON.stringify({ board: 'pale', pieces: 'celtic' }));
-		localStorage.setItem('frostfall.game', JSON.stringify({ fen: f, moves: [], human: 16, level: 'novice', flipped: true }));
-	}, fen);
-	await page.reload();
+	await page.evaluate(() => localStorage.setItem('frostfall.v2', JSON.stringify({ board: 'pale', pieces: 'celtic' })));
+	await reloadWith(page, { fen, moves: [], human: 16, level: 'novice', flipped: true });
 	await page.waitForTimeout(300);
 	const shot = await page.screenshot();      // 黑方视角的整页截图
 	await page.click('.topbar [data-act="photo"]');
@@ -211,20 +220,26 @@ async function assertPiecesUnobscured(page, label) {
 }
 const exposeEffects = page => page.addStyleTag({ content: '.b2d-fx, .b2d-fx *, .b2d-marks, .b2d-marks *, .b2d-arrows, .b2d-arrows * { pointer-events: auto !important; }' });
 
+// 装作有震动马达的触屏设备：记录震动调用。
+const fakeVibrator = () => {
+	window.vib = [];
+	navigator.vibrate = p => { window.vib.push(p); return true; };
+	const mm = window.matchMedia.bind(window);
+	window.matchMedia = q => q === '(pointer: coarse)' ? { matches: true, media: q } : mm(q);
+};
+
 await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金光、提示箭头', { width: 1280, height: 800 }, async page => {
-	await page.addInitScript(() => { window.vib = []; navigator.vibrate = p => { window.vib.push(p); return true; }; });
+	await page.addInitScript(fakeVibrator);
 	await fresh(page);
 	// 恢复一盘"正被将军"的存档：只显示将军标记，不重放将军脉冲、不震动
-	await page.evaluate(() => localStorage.setItem('frostfall.game', JSON.stringify({ fen: '4k3/8/8/8/4r3/8/8/4K3 w - - 0 1', moves: [], human: 8, level: 'novice' })));
-	await page.reload();
+	await reloadWith(page, { fen: '4k3/8/8/8/4r3/8/8/4K3 w - - 0 1', moves: [], human: 8, level: 'novice' });
 	await page.waitForTimeout(300);
 	assert.equal(await page.locator('#board2d .mk.check').count(), 1, '被将军的王应有将军标记');
 	assert.equal(await page.locator('#board2d .fx-check').count(), 0, '恢复存档不应重放将军脉冲');
 	assert.deepEqual(await page.evaluate(() => window.vib), [], '恢复存档不应震动');
 
 	// 白车 e1 吃 e4 并将军 e8：两个特效都不在 a8 角上，缩放漂移才测得出来
-	await page.evaluate(() => localStorage.setItem('frostfall.game', JSON.stringify({ fen: '4k3/8/8/8/4r3/8/8/4R1K1 w - - 0 1', moves: [], human: 8, level: 'novice' })));
-	await page.reload();
+	await reloadWith(page, { fen: '4k3/8/8/8/4r3/8/8/4R1K1 w - - 0 1', moves: [], human: 8, level: 'novice' });
 	await exposeEffects(page);
 	await click(page, 'e1');
 	await click(page, 'e4');
@@ -250,8 +265,7 @@ await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金�
 	assert.deepEqual((await page.evaluate(() => window.vib)).slice(0, 2), [16, [12, 60, 12]], '吃子一震、将军两震');
 
 	// 一步杀：Qh8#，胜方王格金光
-	await page.evaluate(() => localStorage.setItem('frostfall.game', JSON.stringify({ fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice' })));
-	await page.reload();
+	await reloadWith(page, { fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice' });
 	await exposeEffects(page);
 	await page.keyboard.press('h');                      // 提示箭头（应在棋子之下）
 	await page.waitForSelector('#board2d .b2d-arrows line', { timeout: 8000 });
@@ -264,12 +278,17 @@ await scenario('特效不遮挡棋子：吃子波纹、将军脉冲、胜利金�
 	for (let i = 0; i < 4; i++) { await page.waitForTimeout(250); await assertPiecesUnobscured(page, `胜利金光 ${i}`); }
 	assert.ok(await page.locator('#board2d .mk.win').count() === 1, '胜方王格应有金色底光');
 	assert.match(await page.textContent('[data-slot=result-stats]'), /共 1 回合 · 用时 \d+:\d\d · 吃子 0 次/);
-	assert.equal(await page.textContent('[data-slot=status]'), '对局结束', '状态行不重复结算标题');
+	assert.equal(await page.textContent('[data-slot=status]'), '你赢了！', '状态行要能看到胜负（小屏上结算卡可能在屏幕外）');
 	assert.equal(await page.textContent('[data-slot=eval-text]'), '终局 1-0', '终局显示比分而不是过期的引擎分');
-	// 金光还在播时翻转棋盘：特效是按翻转前的格子定位的，必须清掉
+	// 金光还在播时翻转棋盘：金光要跟着白王一起到翻转后的位置
 	assert.equal(await page.locator('#board2d .fx-win').count(), 1, '此时金光应仍在播放');
 	await page.keyboard.press('f');
-	assert.equal(await page.locator('#board2d .fx').count(), 0, '翻转棋盘后旧特效应清掉（否则会错位）');
+	const off = await page.evaluate(() => {
+		const c = el => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+		const [fx, king] = [c(document.querySelector('#board2d .fx-win')), c(document.querySelector('#board2d .pc[data-p=wK]'))];
+		return Math.hypot(fx[0] - king[0], fx[1] - king[1]) / (document.querySelector('#board2d .b2d-grid').getBoundingClientRect().width / 8);
+	});
+	assert.ok(off < .05, `翻转后金光偏离白王 ${off.toFixed(2)} 格`);
 });
 
 // 结算统计：用时只计在页面上下棋的时间（存档里记的是已用时长）；回合按棋谱编号算。
@@ -277,15 +296,55 @@ await scenario('结算统计：用时不含关页时间、黑先局面回合数'
 	await fresh(page);
 	// 黑先局面：1... Kb8 已走（存档重放），轮到白方 2. Qg8#——两个半步跨两个回合编号。
 	// 存档已用 2 分 5 秒；startedAt 是旧版字段（一天前），不应再被当作开局时刻。
-	await page.evaluate(() => localStorage.setItem('frostfall.game', JSON.stringify({
+	await reloadWith(page, {
 		fen: 'k7/8/1K6/8/8/8/8/6Q1 b - - 0 1', moves: ['a8b8'], human: 8, level: 'novice',
 		elapsed: 125000, startedAt: Date.now() - 86400000
-	})));
-	await page.reload();
+	});
+	// 思考一会儿后切到后台：应立刻存下已用时长（之前只在走子时存，刷新会丢掉这段思考时间）
+	await page.waitForTimeout(1200);
+	const saved = await page.evaluate(() => {
+		Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+		document.dispatchEvent(new Event('visibilitychange'));
+		delete document.hidden;
+		document.dispatchEvent(new Event('visibilitychange'));
+		return JSON.parse(localStorage.getItem('frostfall.game')).elapsed;
+	});
+	assert.ok(saved >= 126000 && saved < 130000, `切后台时应存下已用时长，实际 ${saved}`);
 	await click(page, 'g1');
 	await click(page, 'g8');
 	await page.waitForSelector('[data-slot=result]:not([hidden])', { timeout: 3000 });
 	assert.match(await page.textContent('[data-slot=result-stats]'), /^共 2 回合 · 用时 2:0\d · 吃子 0 次$/);
+});
+
+// 升变选择打开时悔棋，而且没有可悔的棋：棋盘要回到真实局面（兵在第 7 行），不能停在底线。
+await scenario('升变待选时悔棋失败：兵回到原格', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await reloadWith(page, { fen: 'k7/4P3/8/8/8/8/8/K7 w - - 0 1', moves: [], human: 8, level: 'novice' });
+	const [x1, y1] = await point(page, 'e7'), [x2, y2] = await point(page, 'e8');
+	await page.mouse.move(x1, y1);
+	await page.mouse.down();
+	await page.mouse.move(x2, y2, { steps: 6 });
+	await page.mouse.up();
+	await page.waitForSelector('#board2d .b2d-promo:not([hidden])');
+	await page.keyboard.press('u');
+	await page.waitForTimeout(350);
+	assert.ok(await page.locator('#board2d .b2d-promo').isHidden(), '升变选择应收起');
+	const pawn = await page.$eval('#board2d .pc[data-p=wP]', el => [el.style.getPropertyValue('--x'), el.style.getPropertyValue('--y')]);
+	assert.deepEqual(pawn, ['4', '1'], '兵应回到 e7');
+	await click(page, 'e7');
+	assert.ok(await page.locator('#board2d .mk.dot').count() >= 1, 'e7 的兵应能再次选中');
+});
+
+// 小屏手机终局：结算卡把棋谱挤出屏幕，也不能带动整页滚动（棋盘顶行会藏到标题栏下）。
+await scenario('小屏手机终局：页面不跳动、状态行看得到胜负', { width: 375, height: 667 }, async page => {
+	await fresh(page);
+	await reloadWith(page, { fen: 'k7/8/1K6/8/8/8/8/7Q w - - 0 1', moves: [], human: 8, level: 'novice' });
+	await click(page, 'h1');
+	await click(page, 'h8');
+	await page.waitForSelector('[data-slot=result]:not([hidden])', { timeout: 3000 });
+	await page.waitForTimeout(200);
+	assert.equal(await page.evaluate(() => scrollY), 0, '终局时整页不应滚动');
+	assert.equal(await page.textContent('[data-slot=status]'), '你赢了！');
 });
 
 // 每步动画落定后棋盘会按真实局面对账重建；玩家这时正拖着子，不能被打断。
@@ -333,6 +392,8 @@ await scenario('设置：棋盘主题与棋子套装', { width: 1280, height: 80
 	await page.click('#dlg-settings [data-setting="board"] [data-value="mist"]');
 	await page.click('#dlg-settings [data-setting="pieces"] [data-value="fantasy"]');
 	assert.deepEqual(await page.evaluate(() => [document.body.dataset.board, document.body.dataset.pieces]), ['mist', 'fantasy']);
+	// 定位开关本身（新旧版本都有这个元素）；桌面 Chrome 有 navigator.vibrate 但没有马达
+	assert.ok(await page.locator('#dlg-settings [data-setting=haptics]').isHidden(), '桌面电脑没有震动马达，不显示震动开关');
 	await page.reload();
 	assert.equal(await page.evaluate(() => document.body.dataset.board), 'mist', '设置应持久化');
 });

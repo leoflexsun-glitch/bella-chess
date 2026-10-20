@@ -107,13 +107,13 @@ export function createMatch(hooks = {}) {
 		else play();
 	}
 
-	// 净子力分：正数表示该方多子。
 	// 比分（PGN 记法）：'1-0' / '0-1' / '1/2-1/2'，未结束为 '*'。
 	function result() {
 		if (!state.over) return '*';
 		return state.over.winner === WHITE ? '1-0' : state.over.winner === BLACK ? '0-1' : '1/2-1/2';
 	}
 
+	// 净子力分：正数表示该方多子。
 	function tally() {
 		const b = balance(state.pos);
 		return { [WHITE]: b[WHITE].score, [BLACK]: b[BLACK].score };

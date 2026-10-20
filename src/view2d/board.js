@@ -9,6 +9,7 @@
 // 格子编号沿用引擎的 0x88：a8 = 0，h1 = 119。
 
 import { WHITE, KING, QUEEN, ROOK, BISHOP, KNIGHT, KCASTLE, QCASTLE, EP, typeOf, colorOf } from '../chess/engine.js';
+import { pairPieces } from './pairing.js';
 
 const LETTER = { 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K' };
 export const pieceCode = piece => (colorOf(piece) === WHITE ? 'w' : 'b') + LETTER[typeOf(piece)];
@@ -132,54 +133,50 @@ export function createBoard2d(host, intents = {}) {
 	// 一次性特效（吃子波纹、将军脉冲、胜利底光），画在特效层，播完自删。
 	function pulse(sq, kind) {
 		if (sq == null || sq < 0) return;
-		const [x, y] = xy(sq);
 		const el = document.createElement('i');
 		el.className = `fx fx-${kind}`;
-		el.style.setProperty('--x', x);
-		el.style.setProperty('--y', y);
+		el.dataset.sq = sq;          // 翻转棋盘时据此重新定位
+		place(el, sq);
 		fxLayer.append(el);
 		const done = () => el.remove();
 		el.addEventListener('animationend', done, { once: true });
 		setTimeout(done, 4000);   // 兜底（如后台标签页不触发动画事件）；须长于最长的特效（胜利金光 2.8 秒）
 	}
 
-	// 平滑过渡到任意局面（悔棋、复盘浏览）：同位同子不动；同种棋子就近滑过去；
+	// 平滑过渡到任意局面（悔棋、复盘浏览）：同位同子不动；同种棋子就近滑过去（配对见 pairing.js）；
 	// 多出的淡出、缺的淡入。全程棋子形状不变，只是移动。
 	function animateTo(next) {
 		cancelDrag();
 		clearTimeout(settleTimer);
 		board = Int8Array.from(next.board ?? next);
-		const have = new Map(pieces);
+		const left = new Map(pieces);
 		const nextMap = new Map();
-		const rest = [];
+		const need = [];
 		for (let sq = 0; sq < 128; sq++) {
 			if (sq & 0x88 || !board[sq]) continue;
 			const code = pieceCode(board[sq]);
-			const el = have.get(sq);
-			if (el && el.dataset.p === code) { nextMap.set(sq, el); have.delete(sq); }
-			else rest.push({ sq, code });
-		}
-		for (const { sq, code } of rest) {
-			let best = -1, bestD = 99;
-			for (const [from, el] of have) {
-				if (el.dataset.p !== code) continue;
-				const d = Math.max(Math.abs((from & 15) - (sq & 15)), Math.abs((from >> 4) - (sq >> 4)));
-				if (d < bestD) { bestD = d; best = from; }
-			}
-			let el;
-			if (best >= 0) {
-				el = have.get(best);
-				have.delete(best);
+			const el = left.get(sq);
+			if (el && el.dataset.p === code) {
+				// 原位不动的也重新定位一次：升变待选时兵画在底线，但记录仍在原格。
 				place(el, sq);
-				el.classList.add('moving');
-			} else {
-				el = makePiece(board[sq], sq);
-				el.classList.add('appear');
-				piecesLayer.append(el);
-			}
+				nextMap.set(sq, el);
+				left.delete(sq);
+			} else need.push({ sq, code });
+		}
+		const { moves, appear, vanish } = pairPieces([...left].map(([sq, el]) => ({ sq, code: el.dataset.p })), need);
+		for (const [from, to] of moves) {
+			const el = left.get(from);
+			place(el, to);
+			el.classList.add('moving');
+			nextMap.set(to, el);
+		}
+		for (const sq of appear) {
+			const el = makePiece(board[sq], sq);
+			el.classList.add('appear');
+			piecesLayer.append(el);
 			nextMap.set(sq, el);
 		}
-		for (const el of have.values()) el.classList.add('gone');
+		for (const sq of vanish) left.get(sq).classList.add('gone');
 		pieces = nextMap;
 		settle();
 	}
@@ -370,7 +367,7 @@ export function createBoard2d(host, intents = {}) {
 		setFlipped(on) {
 			if (flipped === on) return;
 			flipped = on;
-			fxLayer.replaceChildren();   // 特效按翻转前的格子定位，翻转后会错位
+			for (const el of fxLayer.children) place(el, Number(el.dataset.sq));   // 特效跟着自己的格子走
 			renderCoords();
 			render();
 			renderMarks();
