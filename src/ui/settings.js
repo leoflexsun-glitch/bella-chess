@@ -1,5 +1,7 @@
 // 设置：读写本机存储。隐私模式等环境下存储可能抛错，一律降级为只在内存里生效。
 
+import { jsonStore } from '../core/store.js';
+
 const STORE = 'frostfall.v2';
 const LEGACY = 'frostfall.settings';
 
@@ -34,9 +36,8 @@ const ALLOWED = {
 	badges: ['on', 'off']
 };
 
-function read(key) {
-	try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
-}
+const store = jsonStore();
+const read = key => store.get(key);
 
 // 第 3 版换了棋盘配色（按对比度重新校准）并把默认棋子改为纯白纯黑的"经典"：
 // 旧主题一一对应迁移，旧默认棋子（立体）改为经典；用户刻意选过的其他棋子保留。
@@ -61,5 +62,5 @@ export function loadSettings() {
 }
 
 export function saveSettings(settings) {
-	try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch { /* 存不了就只在本次会话生效 */ }
+	store.set(STORE, settings);
 }

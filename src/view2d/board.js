@@ -46,6 +46,7 @@ export function createBoard2d(host, intents = {}) {
 	let drag = null;
 	let hoverSq = -1;
 	let promoFinish = null;
+	let parked = null;           // 拖到底线、等升变选择的兵：画在目标格，记录仍在原格，对账时别把它拉回去
 
 	const xy = sq => {
 		const f = sq & 15, r = sq >> 4;
@@ -79,6 +80,7 @@ export function createBoard2d(host, intents = {}) {
 	// 整盘重建（无动画）。换局、翻转、切视图走这里，结果只取决于 board。
 	function render() {
 		cancelDrag();
+		parked = null;
 		const next = new Map();
 		const frag = document.createDocumentFragment();
 		eachPiece((sq, piece) => {
@@ -98,7 +100,7 @@ export function createBoard2d(host, intents = {}) {
 			let el = pieces.get(sq);
 			if (el?.isConnected && el.dataset.p === pieceCode(piece) && !el.classList.contains('gone')) {
 				el.classList.remove('moving', 'appear');
-				place(el, sq);
+				if (el !== parked) place(el, sq);
 			} else {
 				el = makePiece(piece, sq);
 				piecesLayer.append(el);
@@ -210,8 +212,7 @@ export function createBoard2d(host, intents = {}) {
 		clearTimeout(settleTimer);
 		settleTimer = setTimeout(() => {
 			// 动画只是视觉；落定后按真实局面对账一次，任何竞态都留不下残子。
-			// 升变选择打开时兵停在底线等选择，先不对账：选完走子或取消时会重新同步。
-			if (promoLayer.hidden) reconcile();
+			reconcile();
 		}, ANIM_MS + 40);
 	}
 
@@ -278,7 +279,7 @@ export function createBoard2d(host, intents = {}) {
 			el.classList.add('snap');
 			el.classList.remove('drag');
 			el.style.transform = '';
-			if (to >= 0) place(el, to);
+			if (to >= 0) { place(el, to); parked = el; }
 			requestAnimationFrame(() => el.classList.remove('snap'));
 		} else if (el.classList.contains('drag')) {
 			// 没被接受：弹回原格（transition 负责动画）。
@@ -341,6 +342,7 @@ export function createBoard2d(host, intents = {}) {
 
 		// 播放一步棋；after 为走完后的局面，动画落定后据此对账。
 		playMove(move, after) {
+			parked = null;
 			fxLayer.replaceChildren();   // 上一步留下的特效（如将军脉冲）属于旧局面，王可能已经走开
 			board = Int8Array.from(after.board ?? after);
 			const el = pieces.get(move.from);
@@ -394,6 +396,7 @@ export function createBoard2d(host, intents = {}) {
 		// 收起升变选择，并把停在底线等选择的兵放回它的格子。
 		cancelPromotion() {
 			promoFinish?.(null);
+			parked = null;
 			for (const [sq, el] of pieces) place(el, sq);
 		},
 		get dragging() { return Boolean(drag); }

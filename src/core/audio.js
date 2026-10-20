@@ -47,15 +47,15 @@ export function createAudio() {
 		if (ctx.state === 'running') return ctx;
 		// 'suspended'（还没有用户手势）或 iOS 来电等打断后的 'interrupted'：拉起来，但这一声不排进去——
 		// 挂起时时钟停在原地，排进去的声音会在恢复的那一刻一齐响。
-		// resume 在个别旧内核里会直接抛错或不返回 Promise，一并兜住。
-		Promise.resolve().then(() => ctx.resume()).catch(() => {});
+		// 在手势回调里同步调用 resume（Safari 要求）；它在个别旧内核里会直接抛错或不返回 Promise，一并兜住。
+		try { ctx.resume()?.catch?.(() => {}); } catch { /* 下次手势再试 */ }
 		return null;
 	};
 
 	// 浏览器要等用户手势才放声：第一次点按或按键时就把音频拉起来（来电打断后同理）。
+	// 触屏上 pointerdown 不算手势，抬起（pointerup / touchend）才算，所以几种都听。
 	const unlock = () => { if (on && ctx?.state !== 'running') ready(); };
-	addEventListener('pointerdown', unlock, { capture: true });
-	addEventListener('keydown', unlock, { capture: true });
+	for (const type of ['pointerdown', 'pointerup', 'touchend', 'keydown']) addEventListener(type, unlock, { capture: true });
 
 	const jitter = amount => 1 + (Math.random() * 2 - 1) * amount;
 

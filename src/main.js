@@ -70,8 +70,7 @@ const view2d = {
 	playMove: (move, after) => board2d.playMove(move, after),
 	setMarks: marks => board2d.setMarks(marks),
 	setFlipped: on => board2d.setFlipped(on),
-	askPromotion: (to, color) => board2d.askPromotion(to, color),
-
+	askPromotion: (to, color) => board2d.askPromotion(to, color)
 };
 const view3d = createView3d({
 	canvas: document.getElementById('stage'),

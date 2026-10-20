@@ -1,40 +1,40 @@
 // 对局存档位：刷新或关掉标签页后能接着下。几个标签页共用一个存档位，用版本号做乐观并发控制。
-// 元数据单独存一个小键（判断时不必解析整份棋谱）：
-//   rev   每次写入/清空加一
+// 元数据单独存一个小键：
+//   rev   每次"真实操作"写入、换局或清空时加一
 //   id    存档位里那盘的对局 id（空位为 null）
-//   ended 最近结束（被清掉）的对局 id
-// 每个标签页各有一个句柄，记着自己上次读写时看到的 rev：
-//   save(claim)  真实操作（人走子、新开局、悔棋）总是写入；
-//   save()       其余时机（电脑应着、切后台、关页）只用来保存本页自己的进度：本页做过真实操作，
-//                且存档位自本页上次读写后没被别的页动过、或已空出且空出的不是本局时才写——
-//                只是打开看看的页不会写，旧标签页不会覆盖新棋，也不会复活已结束的局；
-//   end(id)      终局时，存档位里正是本局、且自本页上次读写后没被别的页动过，才清掉。
+//   ended 最近结束（被清掉）的若干对局 id
+// 每个标签页各有一个句柄，记着自己上次同步时看到的 rev（seen）：
+//   save(claim)  真实操作（人走子、新开局、悔棋）：总是写入，rev 加一。
+//   save()       其余时机（电脑应着、切后台、关页）：
+//                a) 自本页同步后别的页没做过真实操作、位里是同一局、且本页的着法是位里着法的延续
+//                   （只多不少、不分叉）——原样更新，rev 不变，因此不会把正在下的那页挤出同步；
+//                b) 或存档位空着、且本局不在"已结束"名单里——写进去，rev 加一。
+//                所以旧标签页不会覆盖新棋、不会写回分叉的电脑应着，也不会复活已结束的局。
+//   end(id)      终局：位里正是本局、且自本页同步后别的页没做过真实操作，才清掉。
+
+import { jsonStore } from '../core/store.js';
 
 const GAME = 'frostfall.game';
 const META = 'frostfall.meta';
+const KEEP_ENDED = 20;
+
+const extendsLine = (moves, base) => moves.length >= base.length && base.every((m, i) => moves[i] === m);
 
 export function createSaveSlot(storage) {
+	const store = jsonStore(storage);
 	let seen = 0;
-	let acted = false;           // 本页做过真实操作后，才有"自己的进度"可在被动时机保存
-	// 惰性取存储：沙箱 iframe 等环境里一碰 localStorage 就抛错，只能在 try 里访问。
-	const store = () => storage ?? globalThis.localStorage;
-	const get = key => {
-		try { return JSON.parse(store().getItem(key) || 'null'); } catch { return null; }
+	const meta = () => {
+		const m = { rev: 0, id: null, ...store.get(META) };
+		m.ended = Array.isArray(m.ended) ? m.ended : m.ended ? [m.ended] : [];
+		return m;
 	};
-	const put = (key, value) => {
-		try {
-			if (value === null) store().removeItem(key);
-			else store().setItem(key, JSON.stringify(value));
-		} catch { /* 隐私模式等存不了：只在本次会话生效 */ }
-	};
-	const meta = () => ({ rev: 0, id: null, ended: null, ...get(META) });
-	const commit = next => { put(META, next); seen = next.rev; };
+	const commit = next => { store.set(META, next); seen = next.rev; };
 
 	return {
-		// 读出存档并记下此刻的版本；旧版存档没有 id。
+		// 读出存档并与当前版本同步；旧版存档没有 id。
 		load() {
 			seen = meta().rev;
-			const g = get(GAME);
+			const g = store.get(GAME);
 			return g && typeof g.fen === 'string' && Array.isArray(g.moves) ? g : null;
 		},
 
@@ -42,22 +42,23 @@ export function createSaveSlot(storage) {
 		save(snapshot, { claim = false } = {}) {
 			const m = meta();
 			if (!claim) {
-				if (!acted) return false;
-				const free = !m.id && m.ended !== snapshot.id;
-				if (m.rev !== seen && !free) return false;
+				if (m.rev === seen && m.id === snapshot.id && extendsLine(snapshot.moves, store.get(GAME)?.moves ?? [])) {
+					store.set(GAME, snapshot);
+					return true;
+				}
+				if (m.id || m.ended.includes(snapshot.id)) return false;
 			}
-			acted = true;
-			put(GAME, snapshot);
-			commit({ rev: m.rev + 1, id: snapshot.id, ended: m.ended });
+			store.set(GAME, snapshot);
+			commit({ ...m, rev: m.rev + 1, id: snapshot.id });
 			return true;
 		},
 
-		// 本局结束：存档位里正是本局、且没被别的页动过才清掉（别的页可能接着这局下了更多步）；返回是否清了。
+		// 本局结束：位里正是本局、且没被别的页接着下过才清掉；返回是否清了。
 		end(id) {
 			const m = meta();
 			if (m.id !== id || m.rev !== seen) return false;
-			put(GAME, null);
-			commit({ rev: m.rev + 1, id: null, ended: id });
+			store.set(GAME, null);
+			commit({ rev: m.rev + 1, id: null, ended: [...m.ended, id].slice(-KEEP_ENDED) });
 			return true;
 		}
 	};

@@ -8,6 +8,8 @@ export function createHaptics() {
 		&& typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 	const buzz = pattern => {
 		if (!on || !can) return;
+		// 用户还没碰过页面（如恢复存档后电脑先走）：浏览器会拦下并报警告，干脆不震。
+		if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
 		try { navigator.vibrate(pattern); } catch { /* 部分浏览器在无用户手势时会拒绝，忽略 */ }
 	};
 	return {

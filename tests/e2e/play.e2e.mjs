@@ -413,6 +413,23 @@ await scenario('悔棋后立刻拖子：拖拽不被动画收尾打断', { width
 	assert.equal(await page.locator('#board2d .pc[data-p=wP]').count(), 8, '弹回后局面完整');
 });
 
+// 正常存档（带对局 id）刷新后：没走棋也要能存下用时和翻转（切后台/关页时）。
+await scenario('刷新后切后台：用时与翻转照常存下', { width: 1280, height: 800 }, async page => {
+	await fresh(page);
+	await page.click('#dlg-new [data-act="start"]');
+	await click(page, 'e2');
+	await click(page, 'e4');
+	await waitMoves(page, 2);
+	await page.reload();
+	const before = await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')));
+	await page.keyboard.press('f');
+	await page.waitForTimeout(1200);
+	await hideTab(page);
+	const after = await page.evaluate(() => JSON.parse(localStorage.getItem('frostfall.game')));
+	assert.equal(after.flipped, true, '翻转应存下');
+	assert.ok(after.elapsed >= before.elapsed + 1000, `用时应增加：${before.elapsed} → ${after.elapsed}`);
+});
+
 // 在后台标签页里打开（如按住 Ctrl 点开、浏览器恢复会话）：切到前台之前不计时。
 await scenario('后台标签页打开存档：切到前台前不计时', { width: 1280, height: 800 }, async page => {
 	await page.addInitScript(() => {
@@ -485,9 +502,10 @@ await scenario('升变待选时复盘、认输：选择框收起、棋盘不失�
 // 悔棋动画还没落定就把兵拖到底线：选择框打开期间，动画收尾的对账不能把兵拉回原格。
 await scenario('动画收尾时升变待选：兵停在底线等选择', { width: 1280, height: 800 }, async page => {
 	await fresh(page);
-	await reloadWith(page, { fen: 'k7/4P3/8/8/8/8/8/K7 w - - 0 1', moves: ['a1b1', 'a8b7'], human: 8, level: 'novice' });
+	// 已走 1. e8=Q+ Kb7；悔棋：后淡出、兵淡入、黑王滑回，约 230ms 后对账
+	await reloadWith(page, { fen: 'k7/4P3/8/8/8/8/8/K7 w - - 0 1', moves: ['e7e8q', 'a8b7'], human: 8, level: 'novice' });
 	const [x1, y1] = await point(page, 'e7'), [x2, y2] = await point(page, 'e8');
-	await page.keyboard.press('u');                      // 两王滑回原位，约 230ms 后对账
+	await page.keyboard.press('u');
 	await page.mouse.move(x1, y1);
 	await page.mouse.down();
 	await page.mouse.move(x2, y2, { steps: 3 });
@@ -496,6 +514,7 @@ await scenario('动画收尾时升变待选：兵停在底线等选择', { width
 	await page.waitForTimeout(400);                      // 跨过对账时刻
 	const pawn = await page.$eval('#board2d .pc[data-p=wP]', el => el.style.getPropertyValue('--y'));
 	assert.equal(pawn, '0', '选择框打开时兵应停在 e8');
+	assert.equal(await page.locator('#board2d .pc.gone').count(), 0, '对账照常清掉淡出的残子（那颗后）');
 	await page.click('#board2d .promo-choice[data-type="5"]');
 	await page.waitForTimeout(300);
 	assert.equal(await page.locator('#board2d .pc[data-p=wQ]').count(), 1, '选后升变为后');
